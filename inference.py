@@ -4,14 +4,14 @@ import uuid # For generating unique filenames
 from PIL import Image
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler
-from utils import load_face_images, prepare_ip_adapter_inputs, export_video_with_opencv
+# --- Import the new imageio exporter ---
+from utils import load_face_images, prepare_ip_adapter_inputs, export_video_with_imageio
 
 # Define the directory where videos will be stored
 OUTPUT_DIR = "/workspace/outputs"
 
 
 # ========= Load Models =========
-# These prints run at startup and usually flush correctly, but adding flush=True is safer.
 print("[INFO] Initializing models and pipeline...", flush=True)
 
 base_model_id = "SG161222/Realistic_Vision_V5.1_noVAE"
@@ -44,7 +44,6 @@ print("[INFO] Models and pipeline are initialized.", flush=True)
 
 # ========= Video Generation Logic =========
 def generate_kissing_video(input_data):
-    # Add flush=True to all print statements to ensure immediate output
     print("🧠 Loading and preparing face images...", flush=True)
     face_images = load_face_images([
         input_data['face_image1'],
@@ -82,12 +81,14 @@ def generate_kissing_video(input_data):
         ).frames[0]
 
     video_frames = result
-    print("💾 Exporting video to local storage as MP4...", flush=True)
+    # --- Use imageio to export the MP4 ---
+    print("💾 Exporting video to local storage as MP4 using imageio...", flush=True)
     
     filename = f"{uuid.uuid4()}.mp4"
     output_path = os.path.join(OUTPUT_DIR, filename)
     
-    export_video_with_opencv(video_frames, output_path, fps=8)
+    # Use our new, more robust imageio export function
+    export_video_with_imageio(video_frames, output_path, fps=8)
 
     if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
         raise RuntimeError("MP4 export failed: The output file is missing or empty.")
