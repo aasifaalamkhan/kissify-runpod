@@ -4,7 +4,7 @@ import io
 import os
 import requests
 import time
-import torch  # <-- ADD THIS LINE
+import torch
 from torchvision import transforms
 import numpy as np
 import cv2
@@ -14,9 +14,8 @@ from realesrgan import RealESRGANer
 from basicsr.archs.rrdbnet_arch import RRDBNet
 import ffmpeg
 from facenet_pytorch import MTCNN
-from controlnet_aux import OpenposeDetector # New import for pose detection
+from controlnet_aux import OpenposeDetector
 
-# ... (Face detector initialization is unchanged) ...
 print("Initializing MTCNN face detector...", flush=True)
 face_detector = MTCNN(
     keep_all=False, post_process=False, min_face_size=40,
@@ -24,13 +23,11 @@ face_detector = MTCNN(
 )
 print("✅ Face detector initialized.", flush=True)
 
-# --- NEW: Initialize the OpenPose detector ---
 print("Initializing OpenPose detector...", flush=True)
 pose_detector = OpenposeDetector.from_pretrained('lllyasviel/ControlNet')
 print("✅ OpenPose detector initialized.", flush=True)
 
 
-# --- NEW FUNCTION TO EXTRACT POSE SEQUENCE FROM TEMPLATE ---
 def extract_pose_sequence(template_video_path):
     """
     Processes a template video to extract a sequence of OpenPose skeleton images.
@@ -53,27 +50,16 @@ def extract_pose_sequence(template_video_path):
     print(f"✅ Extracted {len(pose_sequence)} poses from motion template.", flush=True)
     return pose_sequence
 
-# ... (The rest of the functions are unchanged) ...
 def crop_face(pil_image):
     boxes, _ = face_detector.detect(pil_image)
     if boxes is None or len(boxes) == 0:
-        raise RuntimeError("No face detected in one of the images.")
+        # If no face detected, return the original image resized as a fallback
+        print("⚠️ Warning: No face detected. Using resized original image.", flush=True)
+        return pil_image.resize((224, 224))
     
-    # Get the bounding box of the first detected face
     box = boxes[0]
-    
-    # Crop the image
-    # The box is [x1, y1, x2, y2]
     cropped_image = pil_image.crop(box)
     return cropped_image
-
-def prepare_ip_adapter_inputs(images, device="cuda"):
-    processor = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
-    ])
-    return [processor(img).unsqueeze(0).to(device) for img in images]
 
 def load_and_encode_image(image_path):
     with open(image_path, "rb") as f:
@@ -97,13 +83,12 @@ def export_video_with_imageio(video_frames, output_path, fps):
 
 def upscale_video(input_path, output_path, device="cuda"):
     print(f"Upscaling video: {input_path}", flush=True)
-    model_name = 'RealESRGAN_x4plus_anime_6B'
-    model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=6, num_grow_ch=32, scale=4)
+    model_name = 'RealESRGAN_x4plus'
+    model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
     upsampler = RealESRGANer(
         scale=4,
-        model_path=f'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/{model_name}.pth',
+        model_path=f'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/{model_name}.pth',
         model=model,
-        dni_weight=None,
         tile=400,
         tile_pad=10,
         pre_pad=0,
@@ -111,13 +96,11 @@ def upscale_video(input_path, output_path, device="cuda"):
         gpu_id=0 if 'cuda' in device else None
     )
 
-    # Use ffmpeg-python to handle video frames
     cap = cv2.VideoCapture(input_path)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
 
-    # Define the writer for the output video
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(output_path, fourcc, fps, (width * 4, height * 4))
 
@@ -126,10 +109,9 @@ def upscale_video(input_path, output_path, device="cuda"):
         if not ret:
             break
         
-        # Upscale frame
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         output, _ = upsampler.enhance(img, outscale=4)
-        output = cv2.cvtColor(output, cv2.COLOR_RGB2BGR)
+        output = cv2.cvtColor(output, cv2.COLOR_RGB_BGR)
 
         out.write(output)
 
