@@ -77,7 +77,7 @@ def generate_kissing_video(input_data):
         # --- Sliding Window & Speed Parameters ---
         window_size = 32
         stride = 16
-        generation_steps = 25  # Reduced from 50 for speed
+        generation_steps = 25
         total_frames = len(POSE_SEQUENCE)
         all_frames = []
 
@@ -102,12 +102,12 @@ def generate_kissing_video(input_data):
                     prompt=prompt,
                     negative_prompt=negative_prompt,
                     image=chunk_poses,
-                    controlnet_conditioning_scale=0.8,
+                    controlnet_conditioning_scale=0.9,  # FIX: Increased for better pose adherence
                     ip_adapter_image=composite_image,
-                    ip_adapter_scale=1.8,
+                    ip_adapter_scale=0.8,               # FIX: Drastically reduced to prevent artifacts
                     num_frames=window_size,
                     guidance_scale=7.0,
-                    num_inference_steps=generation_steps,  # FASTER
+                    num_inference_steps=generation_steps,
                 ).frames[0]
 
                 if i == 0:
@@ -124,12 +124,7 @@ def generate_kissing_video(input_data):
         print("🚀 Step 4/5: Post-processing (exporting video)...", flush=True)
         export_start_time = time.time()
 
-        # FIX: Export directly to the final path. No more raw/temp file.
         export_video_with_imageio(video_frames, final_video_path, fps=8)
-
-        # NOTE: Upscaling and smoothing are disabled for performance.
-        # upscale_video(raw_video_path, upscaled_video_path)
-        # smooth_video(raw_video_path, final_video_path, target_fps=48)
 
         export_end_time = time.time()
         export_duration = export_end_time - export_start_time
@@ -142,4 +137,3 @@ def generate_kissing_video(input_data):
         print("🧹 Cleaning up...", flush=True)
         gc.collect()
         torch.cuda.empty_cache()
-        # No raw file to clean up anymore. The final file is kept.
