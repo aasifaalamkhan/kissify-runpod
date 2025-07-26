@@ -56,14 +56,15 @@ def export_video_with_imageio(video_frames, output_path, fps):
 
     print(f"Attempting to save video with imageio to {output_path}...", flush=True)
     
-    # --- FIX: Explicitly set the pixel format to the most compatible option ---
+    # --- FIX: Pass pix_fmt inside the correct 'output_params' argument ---
+    # This is the correct way to pass codec-specific options in this imageio version.
     imageio.mimwrite(
         output_path, 
         numpy_frames, 
         fps=fps, 
         quality=8, 
         macro_block_size=None,
-        pix_fmt='yuv420p' # Add this line for maximum browser compatibility
+        output_params=['-pix_fmt', 'yuv420p'] # Pass as a list of command-line args
     )
     
     print(f"Video saved to {output_path} using imageio.", flush=True)
