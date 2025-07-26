@@ -1,6 +1,7 @@
 import os
 import torch
 import uuid # For generating unique filenames
+import gc   # Import the garbage collector
 from PIL import Image
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler
@@ -47,65 +48,87 @@ print("[INFO] Models and pipeline are initialized.", flush=True)
 
 # ========= Video Generation Logic =========
 def generate_kissing_video(input_data):
-    print("🧠 Loading and preparing face images...", flush=True)
-    pil_images = load_face_images([
-        input_data['face_image1'],
-        input_data['face_image2']
-    ])
-    prepared_images = prepare_ip_adapter_inputs(pil_images, device)
+    """
+    Generates a video from input images and handles memory cleanup.
+    """
+    # Initialize variables to ensure they are in scope for the 'finally' block
+    ip_embeds = None
+    positive_embeds = None
+    negative_embeds = None
+    video_frames = None
+    output = None 
 
-    print("🔍 Encoding faces with IP-Adapter...", flush=True)
-    face_embeds = []
-    for image in prepared_images:
-        embeds = image_encoder(image).image_embeds
-        face_embeds.append(embeds)
+    try:
+        print("🧠 Loading and preparing face images...", flush=True)
+        pil_images = load_face_images([
+            input_data['face_image1'],
+            input_data['face_image2']
+        ])
+        prepared_images = prepare_ip_adapter_inputs(pil_images, device)
 
-    positive_embeds = torch.cat(face_embeds, dim=0).mean(dim=0, keepdim=True)
-    
-    # --- FIX: Explicitly cast the embeddings to the pipeline's data type (float32) ---
-    positive_embeds = positive_embeds.to(dtype=pipe.dtype)
+        print("🔍 Encoding faces with IP-Adapter...", flush=True)
+        face_embeds = []
+        for image in prepared_images:
+            embeds = image_encoder(image).image_embeds
+            face_embeds.append(embeds)
 
-    positive_embeds = positive_embeds.unsqueeze(0)
-    negative_embeds = torch.zeros_like(positive_embeds)
-    ip_embeds = torch.cat([negative_embeds, positive_embeds], dim=0)
+        positive_embeds = torch.cat(face_embeds, dim=0).mean(dim=0, keepdim=True)
+        positive_embeds = positive_embeds.to(dtype=pipe.dtype)
+        positive_embeds = positive_embeds.unsqueeze(0)
+        negative_embeds = torch.zeros_like(positive_embeds)
+        ip_embeds = torch.cat([negative_embeds, positive_embeds], dim=0)
 
-    # --- New improved prompt and settings ---
-    prompt = (input_data.get("prompt") or "").strip()
-    if not prompt:
-        prompt = "masterpiece, best quality, ultra-detailed photo of a passionate kiss between a man and a woman, closed eyes, soft lighting, cinematic close-up, intimate embrace, delicate facial expressions, highly detailed, ultra-realistic, photorealistic, 4k"
-    
-    # --- Tighter negative prompt ---
-    negative_prompt = "cartoon, painting, illustration, (worst quality, low quality, normal quality:2), deformed, ugly, disfigured, weird faces, open mouths, eyes open, awkward poses, stiff, blurry"
+        prompt = (input_data.get("prompt") or "").strip()
+        if not prompt:
+            prompt = "masterpiece, best quality, ultra-detailed photo of a passionate kiss between a man and a woman, closed eyes, soft lighting, cinematic close-up, intimate embrace, delicate facial expressions, highly detailed, ultra-realistic, photorealistic, 4k"
 
-    # --- Increased IP-Adapter scale for better face matching ---
-    pipe.set_ip_adapter_scale(1.5)
+        negative_prompt = "cartoon, painting, illustration, (worst quality, low quality, normal quality:2), deformed, ugly, disfigured, weird faces, open mouths, eyes open, awkward poses, stiff, blurry"
 
-    print(f"🎨 Generating animation with prompt: '{prompt}'", flush=True)
-    with torch.inference_mode():
-        result = pipe(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            ip_adapter_image_embeds=[ip_embeds],
-            num_frames=32, # Kept at 32 due to model limitations
-            guidance_scale=5.0, # Lowered for smoother, more natural motion
-            num_inference_steps=50, # Increased for higher quality frames
-        ).frames[0]
+        pipe.set_ip_adapter_scale(1.5)
 
-    video_frames = result
-    print("💾 Exporting video to local storage as MP4 using imageio...", flush=True)
-    
-    filename = f"{uuid.uuid4()}.mp4"
-    output_path = os.path.join(OUTPUT_DIR, filename)
-    
-    # Increased FPS for smoother playback
-    export_video_with_imageio(video_frames, output_path, fps=24)
+        print(f"🎨 Generating animation with prompt: '{prompt}'", flush=True)
+        with torch.inference_mode():
+            output = pipe(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                ip_adapter_image_embeds=[ip_embeds],
+                num_frames=32,
+                guidance_scale=5.0,
+                num_inference_steps=50,
+            ).frames[0]
+        
+        video_frames = output
 
-    if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-        raise RuntimeError("MP4 export failed: The output file is missing or empty.")
-    
-    print(f"✅ MP4 exported successfully to {output_path}. Size: {os.path.getsize(output_path)} bytes.", flush=True)
+        print("💾 Exporting video to local storage as MP4 using imageio...", flush=True)
+        filename = f"{uuid.uuid4()}.mp4"
+        output_path = os.path.join(OUTPUT_DIR, filename)
+        export_video_with_imageio(video_frames, output_path, fps=24)
 
-    torch.cuda.empty_cache()
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            raise RuntimeError("MP4 export failed: The output file is missing or empty.")
 
-    print("✅ Done!", flush=True)
-    return {"filename": filename}
+        print(f"✅ MP4 exported successfully to {output_path}. Size: {os.path.getsize(output_path)} bytes.", flush=True)
+        print("✅ Done!", flush=True)
+        
+        return {"filename": filename}
+
+    finally:
+        # --- GUARANTEED MEMORY CLEANUP ---
+        # This block executes regardless of whether the 'try' block succeeded or failed.
+        print("🧹 Cleaning up GPU memory...", flush=True)
+        
+        # Explicitly delete large tensor variables to free up references
+        del ip_embeds
+        del positive_embeds
+        del negative_embeds
+        if output is not None:
+            del output
+        if video_frames is not None:
+            del video_frames
+        
+        # Trigger Python's garbage collector to clean up CPU memory
+        gc.collect()
+        
+        # Clear PyTorch's CUDA memory cache to release VRAM back to the OS
+        torch.cuda.empty_cache()
+        print("✅ GPU memory cleared.", flush=True)
