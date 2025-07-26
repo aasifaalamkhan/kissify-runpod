@@ -2,6 +2,7 @@ import os
 import torch
 import uuid
 import gc
+import time  # Import the time module
 from PIL import Image
 from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler, ControlNetModel
 import numpy as np
@@ -53,7 +54,7 @@ print("✅ All models and pose data are ready.", flush=True)
 def generate_kissing_video(input_data):
     """
     Main function to generate a video based on two input face images.
-    Uses a sliding window approach to generate videos longer than the model's context limit.
+    Uses a sliding window approach and now times the final export step.
     """
     raw_video_path = None
     upscaled_video_path = None
@@ -61,7 +62,7 @@ def generate_kissing_video(input_data):
     try:
         unique_id = str(uuid.uuid4())
         raw_filename = f"{unique_id}_raw.mp4"
-        final_filename = f"{unique_id}_final.mp4" # We won't have an upscaled filename now
+        final_filename = f"{unique_id}_final.mp4"
 
         raw_video_path = os.path.join(OUTPUT_DIR, raw_filename)
         final_video_path = os.path.join(OUTPUT_DIR, final_filename)
@@ -126,13 +127,20 @@ def generate_kissing_video(input_data):
         print(f"✅ Step 3/5: Finished generation. Total frames: {len(video_frames)}", flush=True)
 
         print("🚀 Step 4/5: Post-processing (export & smooth)...", flush=True)
+        # --- Start timing the export process ---
+        export_start_time = time.time()
+
         export_video_with_imageio(video_frames, raw_video_path, fps=8)
         
-        # --- CHANGE 1: Commented out the upscale_video line ---
+        # Upscaling is currently skipped for faster testing
         # upscale_video(raw_video_path, upscaled_video_path)
         
-        # --- CHANGE 2: Changed input for smooth_video to raw_video_path ---
         smooth_video(raw_video_path, final_video_path, target_fps=48)
+        
+        # --- End timing and print the duration ---
+        export_end_time = time.time()
+        export_duration = export_end_time - export_start_time
+        print(f"✅ Post-processing finished in {export_duration:.2f} seconds.")
 
         print("✅ Step 5/5: Done!", flush=True)
         return {"filename": final_filename}
@@ -143,7 +151,4 @@ def generate_kissing_video(input_data):
         torch.cuda.empty_cache()
         if raw_video_path and os.path.exists(raw_video_path):
             os.remove(raw_video_path)
-        # We no longer have an upscaled_video_path to remove
-        # if upscaled_video_path and os.path.exists(upscaled_video_path):
-        #     os.remove(upscaled_video_path)
 
