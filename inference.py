@@ -79,9 +79,9 @@ def generate_kissing_video(input_data):
             prompt=prompt,
             negative_prompt=negative_prompt,
             ip_adapter_image_embeds=[ip_embeds],
-            num_frames=40, # Increased from 16 to 40 for a 5-second video at 8fps
+            num_frames=32, # FIX: Reduced from 40 to 32 to respect the model's limit
             guidance_scale=7.5,
-            num_inference_steps=40, # Increased from 30 for more detail
+            num_inference_steps=40,
         ).frames[0]
 
     video_frames = result
