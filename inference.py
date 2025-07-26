@@ -58,11 +58,8 @@ def generate_kissing_video(input_data):
     # This is the positive embedding
     stacked_embeds = torch.cat(face_embeds, dim=0).mean(dim=0, keepdim=True)
 
-    # --- FIX: Reshape the tensor to be 3D [batch_size, num_images, embedding_dim] ---
-    # The pipeline expects a 3D tensor, but our tensor is 2D (1, 1024).
-    # We add a dimension to make it 3D (1, 1, 1024).
+    # Reshape the tensor to be 3D [batch_size, num_images, embedding_dim]
     stacked_embeds = stacked_embeds.unsqueeze(0)
-
 
     # Create a tensor of zeros for the negative embeddings
     negative_embeds = torch.zeros_like(stacked_embeds)
@@ -79,13 +76,14 @@ def generate_kissing_video(input_data):
 
     print(f"🎨 Generating animation with prompt: '{prompt}'")
     with torch.inference_mode():
+        # --- FIX: Wrap the tensor in a list ---
         result = pipe(
             prompt=prompt,
             negative_prompt=negative_prompt,
             num_frames=16,
             guidance_scale=7.0,
             num_inference_steps=25,
-            ip_adapter_image_embeds=ip_embeds # Pass the correctly shaped 3D tensor
+            ip_adapter_image_embeds=[ip_embeds] # Pass the tensor inside a list
         ).frames[0]
 
     video_frames = result
