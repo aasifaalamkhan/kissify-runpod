@@ -51,19 +51,28 @@ def handle_generation():
         return jsonify({"error": "Request must include 'face_image1' and 'face_image2'"}), 400
 
     try:
-        # This will now return {"filename": "some_unique_name.mp4"}
         result = generate_kissing_video(data)
         filename = result.get("filename")
 
         if not filename:
             raise RuntimeError("Generation succeeded but did not return a filename.")
 
-        # Construct the full, public URL for the video file
-        # url_for will create a relative path like '/outputs/some_unique_name.mp4'
-        # We then join it with the request's host URL to make it absolute.
-        video_url = request.host_url.rstrip('/') + url_for('serve_video', filename=filename)
+        # --- FIX: Construct the public URL correctly using proxy headers ---
+        # The 'X-Forwarded-Proto' and 'X-Forwarded-Host' headers are added by the RunPod proxy
+        # and tell us the original public URL.
+        proto = request.headers.get("X-Forwarded-Proto", "http")
+        host = request.headers.get("X-Forwarded-Host", request.host)
         
-        print(f"Generated video URL: {video_url}")
+        # Create the correct base URL (e.g., https://your-pod-proxy.runpod.net)
+        base_url = f"{proto}://{host}"
+        
+        # Create the full path to the video file
+        video_path = url_for('serve_video', filename=filename)
+        
+        # Combine them for the final, public URL
+        video_url = f"{base_url}{video_path}"
+        
+        print(f"Generated public video URL: {video_url}")
         return jsonify({"video_url": video_url})
 
     except Exception as e:
