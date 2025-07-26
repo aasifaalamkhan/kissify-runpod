@@ -19,11 +19,15 @@ MOTION_TEMPLATE_PATH = "/workspace/kissify-runpod/motion_template.mp4"
 print("[INFO] Initializing models and pipeline...", flush=True)
 device = "cuda"
 
-# --- CORRECTED: Load ControlNet from a single checkpoint file ---
-# The from_pretrained() method fails because the repo lacks a config.json.
-# We use from_single_file() to load the raw .pth checkpoint directly.
-controlnet_checkpoint_url = "https://huggingface.co/lllyasviel/control-v11p-sd15-openpose/resolve/main/control_v11p_sd15_openpose.pth"
-controlnet = ControlNetModel.from_single_file(controlnet_checkpoint_url, torch_dtype=torch.float16).to(device)
+# --- FINAL FIX: Load ControlNet by separating repo_id and filename ---
+# This prevents the URL from being duplicated.
+controlnet_repo_id = "lllyasviel/control-v11p-sd15-openpose"
+controlnet_filename = "control_v11p_sd15_openpose.pth"
+controlnet = ControlNetModel.from_single_file(
+    controlnet_repo_id,
+    filename=controlnet_filename,
+    torch_dtype=torch.float16
+).to(device)
 
 
 base_model_id = "SG161222/Realistic_Vision_V5.1_noVAE"
