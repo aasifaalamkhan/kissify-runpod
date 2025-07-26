@@ -8,12 +8,16 @@ from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler, Control
 from utils import (
     load_face_images, crop_face,
     export_video_with_imageio, upscale_video, smooth_video,
-    extract_pose_sequence
+    extract_pose_sequence,
+    save_pose_sequence, load_pose_sequence # <--- Import new functions
 )
 
 # --- Define constants ---
 OUTPUT_DIR = "/workspace/outputs"
 MOTION_TEMPLATE_PATH = "/workspace/kissify-runpod/motion_template.mp4"
+# --- NEW: Define path for cached pose sequence ---
+CACHED_POSE_PATH = "/workspace/kissify-runpod/cached_pose_sequence.npy"
+
 
 # --- Load Models ---
 print("[INFO] Initializing models and pipeline...", flush=True)
@@ -28,7 +32,6 @@ base_model_id = "SG161222/Realistic_Vision_V5.1_noVAE"
 motion_module_id = "guoyww/animatediff-motion-adapter-v1-5-3"
 ip_adapter_repo_id = "h94/IP-Adapter"
 
-# Keep the same image_encoder and image_processor for both IP-Adapters
 image_encoder = CLIPVisionModelWithProjection.from_pretrained(
     ip_adapter_repo_id, subfolder="models/image_encoder", torch_dtype=torch.float16
 ).to(device).eval()
@@ -45,21 +48,20 @@ pipe = AnimateDiffPipeline.from_pretrained(
 pipe.scheduler = DDIMScheduler.from_pretrained(base_model_id, subfolder="scheduler")
 
 # --- IMPORTANT CHANGE: Load IP-Adapter TWICE for two separate conditions ---
-# The load_ip_adapter method can take a list of (pretrained_model_name_or_path, subfolder, weight_name) tuples
-# or just be called multiple times. Loading it twice explicitly handles two separate conditions.
-# For simplicity and clarity for two distinct subjects, we can load it this way:
 pipe.load_ip_adapter(
     ip_adapter_repo_id, subfolder="models", weight_name="ip-adapter_sd15.bin"
 )
-# Load it again as a second IP-Adapter. Diffusers handles the internal indexing.
 pipe.load_ip_adapter(
     ip_adapter_repo_id, subfolder="models", weight_name="ip-adapter_sd15.bin"
 )
 print("[INFO] Models and pipeline are initialized.", flush=True)
 
-
 # --- Pre-process and cache the pose sequence at startup ---
-POSE_SEQUENCE = extract_pose_sequence(MOTION_TEMPLATE_PATH)
+# --- NEW: Check for cached poses before extracting ---
+POSE_SEQUENCE = load_pose_sequence(CACHED_POSE_PATH)
+if POSE_SEQUENCE is None:
+    POSE_SEQUENCE = extract_pose_sequence(MOTION_TEMPLATE_PATH)
+    save_pose_sequence(POSE_SEQUENCE, CACHED_POSE_PATH) # Save after extraction
 NUM_FRAMES = len(POSE_SEQUENCE)
 
 
@@ -94,15 +96,9 @@ def generate_kissing_video(input_data):
 
         # --- Step 3: Preparing faces for IP-Adapter (passing two distinct images) ---
         print("🔍 Step 3/5: Preparing faces for IP-Adapter...", flush=True)
-        # Now we can simply pass the list of cropped PIL images directly to ip_adapter_image
-        # because the pipeline now has two IP-Adapters loaded.
         ip_adapter_images_for_pipeline = [face1_cropped, face2_cropped]
 
-
         prompt = "a man and a woman kissing, best quality, realistic, masterpiece, high resolution"
-        # Adjusting the prompt if needed to emphasize two distinct people (optional, but good practice)
-        # prompt = "a man and a woman kissing, distinct features, best quality, realistic, masterpiece, high resolution"
-
         negative_prompt = "monochrome, lowres, bad anatomy, worst quality, low quality, blurry, nsfw, text, watermark, logo"
 
         # --- Step 4: Generating ControlNet-guided animation ---
@@ -113,11 +109,8 @@ def generate_kissing_video(input_data):
                 negative_prompt=negative_prompt,
                 image=POSE_SEQUENCE,
                 controlnet_conditioning_scale=0.8,
-                # --- IMPORTANT CHANGE: Pass the list of PIL images directly here ---
                 ip_adapter_image=ip_adapter_images_for_pipeline,
-                # If you want different scales for each IP-Adapter, you can pass a list of floats
-                # ip_adapter_scale=[1.8, 1.8], # Example for two adapters
-                ip_adapter_scale=1.8, # This will apply the same scale to both
+                ip_adapter_scale=1.8,
                 num_frames=NUM_FRAMES,
                 guidance_scale=5.0,
                 num_inference_steps=50,
@@ -133,7 +126,7 @@ def generate_kissing_video(input_data):
         return {"filename": final_filename}
 
     finally:
-        # --- Cleanup: Free GPU memory and delete temporary files ---
+        # --- Cleanup: Free GPU memory and temporary files ---
         print("🧹 Cleaning up GPU memory and temporary files...", flush=True)
         gc.collect()
         torch.cuda.empty_cache()
