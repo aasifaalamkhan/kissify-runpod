@@ -7,9 +7,19 @@ app = Flask(__name__)
 # --- Pre-load and Warm-up Model ---
 print("[INFO] Loading model to GPU for the first time...")
 pipe.to("cuda")
-# Perform a single dummy inference step to warm up the model
+
+# --- FIX: Create dummy embeddings for the warmup call ---
+# The IP-Adapter expects image embeddings, so we create a dummy tensor.
+# The shape is (batch_size, num_images, embedding_dim)
+print("[INFO] Performing warm-up inference step...")
 with torch.inference_mode():
-    pipe(prompt="warmup", num_inference_steps=1, num_frames=1)
+    dummy_embeds = torch.randn(1, 1, 1024, dtype=torch.float16, device="cuda")
+    pipe(
+        prompt="warmup",
+        num_inference_steps=1,
+        num_frames=1,
+        ip_adapter_image_embeds=[dummy_embeds] # Pass the dummy data here
+    )
 torch.cuda.empty_cache()
 print("✅ [INFO] Model is warmed up and ready.")
 
