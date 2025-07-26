@@ -5,6 +5,8 @@ import os
 import requests
 import time
 from torchvision import transforms
+import numpy as np
+import cv2 # Import OpenCV
 
 def prepare_ip_adapter_inputs(images, device="cuda"):
     """
@@ -52,7 +54,7 @@ def upload_to_catbox(file_path, max_retries=3, delay=3):
                     url,
                     data={"reqtype": "fileupload"},
                     files={"fileToUpload": f},
-                    timeout=30 # Increased timeout for larger files
+                    timeout=30
                 )
             if response.status_code == 200 and response.text.startswith("https://"):
                 return response.text.strip()
@@ -64,3 +66,30 @@ def upload_to_catbox(file_path, max_retries=3, delay=3):
                 time.sleep(delay)
             else:
                 raise RuntimeError(f"Catbox upload failed after {max_retries} attempts: {e}")
+
+
+def export_video_with_opencv(video_frames, output_path, fps):
+    """
+    Manually exports video frames using OpenCV to ensure codec compatibility.
+    """
+    if not video_frames:
+        raise ValueError("Input video_frames list is empty.")
+    
+    # Get frame size from the first image
+    first_frame = video_frames[0]
+    height, width, layers = np.array(first_frame).shape
+    size = (width, height)
+    
+    # Define the codec and create VideoWriter object
+    # 'mp4v' is a good, compatible choice for .mp4 files
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
+    out = cv2.VideoWriter(output_path, fourcc, fps, size)
+    
+    for frame_pil in video_frames:
+        # Convert PIL Image (RGB) to OpenCV format (BGR)
+        frame_np = np.array(frame_pil)
+        frame_bgr = cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR)
+        out.write(frame_bgr)
+        
+    out.release() # Release the VideoWriter
+    print(f"Video saved to {output_path} using OpenCV.")
