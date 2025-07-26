@@ -80,9 +80,8 @@ def export_video_with_opencv(video_frames, output_path, fps):
     height, width, layers = np.array(first_frame).shape
     size = (width, height)
     
-    # Define the codec and create VideoWriter object
-    # 'mp4v' is a good, compatible choice for .mp4 files
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
+    # --- FIX: Switched to a more compatible H.264 codec ('avc1') ---
+    fourcc = cv2.VideoWriter_fourcc(*'avc1') 
     out = cv2.VideoWriter(output_path, fourcc, fps, size)
     
     for frame_pil in video_frames:
@@ -92,4 +91,4 @@ def export_video_with_opencv(video_frames, output_path, fps):
         out.write(frame_bgr)
         
     out.release() # Release the VideoWriter
-    print(f"Video saved to {output_path} using OpenCV.")
+    print(f"Video saved to {output_path} using OpenCV with avc1 codec.")
