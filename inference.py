@@ -40,7 +40,9 @@ pipe = AnimateDiffPipeline.from_pretrained(
 ).to(device)
 pipe.scheduler = DDIMScheduler(beta_schedule="linear", num_train_timesteps=1000)
 
-print("[INFO] WORKAROUND: Loading only ONE IP-Adapter.", flush=True)
+# FIX: Load the IP-Adapter twice to handle two separate face images.
+print("[INFO] Loading TWO IP-Adapters for separate face guidance...", flush=True)
+pipe.load_ip_adapter(ip_adapter_repo_id, subfolder="models", weight_name="ip-adapter_sd15.bin")
 pipe.load_ip_adapter(ip_adapter_repo_id, subfolder="models", weight_name="ip-adapter_sd15.bin")
 
 POSE_SEQUENCE = load_pose_sequence(CACHED_POSE_PATH)
@@ -65,7 +67,6 @@ def generate_kissing_video(input_data):
         face_images_b64 = [input_data['face_image1'], input_data['face_image2']]
         pil_images = load_face_images(face_images_b64)
         
-        # FIX: Keep face images separate instead of making a composite.
         face1_cropped = crop_face(pil_images[0]).resize((224, 224))
         face2_cropped = crop_face(pil_images[1]).resize((224, 224))
 
@@ -78,6 +79,9 @@ def generate_kissing_video(input_data):
         generation_steps = 25
         total_frames = len(POSE_SEQUENCE)
         all_frames = []
+        
+        # FIX: Set the weights for each of the two IP-Adapters.
+        pipe.set_ip_adapter_scale([0.7, 0.7])
 
         yield f"🎨 Step 2/5: Starting sliding window generation for {total_frames} frames ({generation_steps} steps/chunk)..."
         with torch.inference_mode():
@@ -101,10 +105,8 @@ def generate_kissing_video(input_data):
                     negative_prompt=negative_prompt,
                     image=chunk_poses,
                     controlnet_conditioning_scale=0.9,
-                    # FIX: Pass the two faces as a list to the IP Adapter.
                     ip_adapter_image=[face1_cropped, face2_cropped],
-                    # FIX: Use a more moderate scale suitable for this method.
-                    ip_adapter_scale=0.7,
+                    # ip_adapter_scale is now set before the loop using set_ip_adapter_scale
                     num_frames=window_size,
                     guidance_scale=7.0,
                     num_inference_steps=generation_steps,
@@ -128,7 +130,6 @@ def generate_kissing_video(input_data):
         yield "✅ Post-processing finished."
         yield "✅ Step 5/5: Done!"
         
-        # YIELD THE FINAL RESULT AS A DICTIONARY
         yield {"filename": final_filename}
 
     finally:
