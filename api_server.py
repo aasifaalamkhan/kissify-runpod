@@ -1,35 +1,46 @@
-from flask import Flask, request, jsonify
+import os
+from flask import Flask, request, jsonify, send_from_directory, url_for
 from inference import generate_kissing_video, pipe
 import torch
 
 app = Flask(__name__)
 
+# Define the directory where videos will be stored
+OUTPUT_DIR = "/workspace/outputs"
+# Create the directory if it doesn't exist
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
 # --- Pre-load and Warm-up Model ---
 print("[INFO] Loading model to GPU for the first time...")
 pipe.to("cuda")
 
-# --- FIX: Create dummy embeddings for the warmup call ---
-# The IP-Adapter expects both negative and positive embeddings for classifier-free guidance.
 print("[INFO] Performing warm-up inference step...")
 with torch.inference_mode():
-    # Create a dummy positive embedding
     positive_embeds = torch.randn(1, 1, 1024, dtype=torch.float16, device="cuda")
-    # Create a dummy negative embedding (a tensor of zeros)
     negative_embeds = torch.zeros_like(positive_embeds)
-    # Concatenate them. The pipeline expects the format [negative, positive].
     dummy_ip_adapter_embeds = torch.cat([negative_embeds, positive_embeds], dim=0)
-
     pipe(
         prompt="warmup",
         num_inference_steps=1,
         num_frames=1,
-        ip_adapter_image_embeds=[dummy_ip_adapter_embeds] # Pass the combined tensor
+        ip_adapter_image_embeds=[dummy_ip_adapter_embeds]
     )
 torch.cuda.empty_cache()
 print("✅ [INFO] Model is warmed up and ready.")
 
 
-# --- API Route ---
+# --- New Route to Serve Video Files ---
+@app.route('/outputs/<path:filename>')
+def serve_video(filename):
+    """
+    Serves a video file from the output directory.
+    """
+    print(f"Serving file: {filename} from {OUTPUT_DIR}")
+    return send_from_directory(OUTPUT_DIR, filename, as_attachment=False)
+
+
+# --- Main API Route ---
 @app.route('/generate', methods=['POST'])
 def handle_generation():
     """
@@ -40,9 +51,21 @@ def handle_generation():
         return jsonify({"error": "Request must include 'face_image1' and 'face_image2'"}), 400
 
     try:
-        # Pass the validated input directly to your generation function
+        # This will now return {"filename": "some_unique_name.mp4"}
         result = generate_kissing_video(data)
-        return jsonify(result)
+        filename = result.get("filename")
+
+        if not filename:
+            raise RuntimeError("Generation succeeded but did not return a filename.")
+
+        # Construct the full, public URL for the video file
+        # url_for will create a relative path like '/outputs/some_unique_name.mp4'
+        # We then join it with the request's host URL to make it absolute.
+        video_url = request.host_url.rstrip('/') + url_for('serve_video', filename=filename)
+        
+        print(f"Generated video URL: {video_url}")
+        return jsonify({"video_url": video_url})
+
     except Exception as e:
         print(f"An error occurred: {e}")
         return jsonify({"error": f"An error occurred during generation: {str(e)}"}), 500
@@ -50,5 +73,4 @@ def handle_generation():
 
 # --- Start Server ---
 if __name__ == '__main__':
-    # Running on 0.0.0.0 makes the server accessible from outside the container
     app.run(host='0.0.0.0', port=5000)
