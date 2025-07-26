@@ -19,10 +19,12 @@ MOTION_TEMPLATE_PATH = "/workspace/kissify-runpod/motion_template.mp4"
 print("[INFO] Initializing models and pipeline...", flush=True)
 device = "cuda"
 
-# --- NEW: Load ControlNet OpenPose Model ---
-# Use a valid, public ControlNet model ID
-controlnet_model_id = "lllyasviel/control-v11p-sd15-openpose"  # <-- CORRECTED THIS LINE
-controlnet = ControlNetModel.from_pretrained(controlnet_model_id, torch_dtype=torch.float16).to(device)
+# --- CORRECTED: Load ControlNet from a single checkpoint file ---
+# The from_pretrained() method fails because the repo lacks a config.json.
+# We use from_single_file() to load the raw .pth checkpoint directly.
+controlnet_checkpoint_url = "https://huggingface.co/lllyasviel/control-v11p-sd15-openpose/resolve/main/control_v11p_sd15_openpose.pth"
+controlnet = ControlNetModel.from_single_file(controlnet_checkpoint_url, torch_dtype=torch.float16).to(device)
+
 
 base_model_id = "SG161222/Realistic_Vision_V5.1_noVAE"
 motion_module_id = "guoyww/animatediff-motion-adapter-v1-5-3"
@@ -34,7 +36,7 @@ image_encoder = CLIPVisionModelWithProjection.from_pretrained(
 image_processor = CLIPImageProcessor.from_pretrained("openai/clip-vit-large-patch14")
 motion_adapter = MotionAdapter.from_pretrained(motion_module_id, torch_dtype=torch.float16).to(device)
 
-# --- NEW: Inject ControlNet into the pipeline ---
+# --- Inject ControlNet into the pipeline ---
 pipe = AnimateDiffPipeline.from_pretrained(
     base_model_id,
     motion_adapter=motion_adapter,
