@@ -66,6 +66,11 @@ def generate_kissing_video(input_data):
     # Average the embeddings of the two faces
     positive_embeds = torch.cat(face_embeds, dim=0).mean(dim=0, keepdim=True)
     
+    # --- FIX: Add the missing dimension back to the tensor ---
+    # The pipeline expects a 3D tensor [batch_size, num_images, embedding_dim].
+    # The averaged tensor is 2D, so we add the batch_size dimension back.
+    positive_embeds = positive_embeds.unsqueeze(0)
+
     # Create negative embeddings (unconditional)
     negative_embeds = torch.zeros_like(positive_embeds)
     
