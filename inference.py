@@ -64,12 +64,10 @@ def generate_kissing_video(input_data):
         yield "🧠 Step 1/5: Loading and preparing images..."
         face_images_b64 = [input_data['face_image1'], input_data['face_image2']]
         pil_images = load_face_images(face_images_b64)
+        
+        # FIX: Keep face images separate instead of making a composite.
         face1_cropped = crop_face(pil_images[0]).resize((224, 224))
         face2_cropped = crop_face(pil_images[1]).resize((224, 224))
-
-        composite_image = Image.new('RGB', (448, 224))
-        composite_image.paste(face1_cropped, (0, 0))
-        composite_image.paste(face2_cropped, (224, 0))
 
         prompt = "photo of a man and a woman kissing, faces of the people from the reference image, best quality, realistic, masterpiece, high resolution"
         negative_prompt = "monochrome, lowres, bad anatomy, worst quality, low quality, blurry, nsfw, text, watermark, logo, two heads, multiple people, deformed"
@@ -103,8 +101,10 @@ def generate_kissing_video(input_data):
                     negative_prompt=negative_prompt,
                     image=chunk_poses,
                     controlnet_conditioning_scale=0.9,
-                    ip_adapter_image=composite_image,
-                    ip_adapter_scale=0.8,
+                    # FIX: Pass the two faces as a list to the IP Adapter.
+                    ip_adapter_image=[face1_cropped, face2_cropped],
+                    # FIX: Use a more moderate scale suitable for this method.
+                    ip_adapter_scale=0.7,
                     num_frames=window_size,
                     guidance_scale=7.0,
                     num_inference_steps=generation_steps,
