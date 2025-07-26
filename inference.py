@@ -4,7 +4,8 @@ import uuid # For generating unique filenames
 from PIL import Image
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler
-from utils import load_face_images, export_video_with_imageio
+# --- We need the imageio exporter and the input preparer again ---
+from utils import load_face_images, prepare_ip_adapter_inputs, export_video_with_imageio
 
 # Define the directory where videos will be stored
 OUTPUT_DIR = "/workspace/outputs"
@@ -18,7 +19,13 @@ motion_module_id = "guoyww/animatediff-motion-adapter-v1-5-3"
 ip_adapter_repo_id = "h94/IP-Adapter"
 device = "cuda"
 
-# We no longer need to load the image encoder separately, the pipeline handles it.
+# --- FIX: We must load the image encoder and processor to manually create embeddings ---
+image_encoder = CLIPVisionModelWithProjection.from_pretrained(
+    ip_adapter_repo_id, subfolder="models/image_encoder", torch_dtype=torch.float16
+).to(device).eval()
+
+image_processor = CLIPImageProcessor.from_pretrained("openai/clip-vit-large-patch14")
+
 motion_adapter = MotionAdapter.from_pretrained(motion_module_id, torch_dtype=torch.float16).to(device)
 
 pipe = AnimateDiffPipeline.from_pretrained(
@@ -27,7 +34,7 @@ pipe = AnimateDiffPipeline.from_pretrained(
     torch_dtype=torch.float16
 )
 pipe.scheduler = DDIMScheduler.from_pretrained(base_model_id, subfolder="scheduler")
-pipe.enable_model_cpu_offload() # Re-enable CPU offload to save VRAM
+pipe.enable_model_cpu_offload()
 
 # Load the IP-Adapter
 pipe.load_ip_adapter(
@@ -40,12 +47,30 @@ print("[INFO] Models and pipeline are initialized.", flush=True)
 
 # ========= Video Generation Logic =========
 def generate_kissing_video(input_data):
-    # --- Simplified logic: Pass PIL images directly to the pipeline ---
-    print("🧠 Loading face images...", flush=True)
+    # --- FIX: Reverting to manual embedding generation to handle two faces correctly ---
+    print("🧠 Loading and preparing face images...", flush=True)
     pil_images = load_face_images([
         input_data['face_image1'],
         input_data['face_image2']
     ])
+    # Prepare images for the encoder
+    prepared_images = prepare_ip_adapter_inputs(pil_images, device)
+
+    print("🔍 Encoding faces with IP-Adapter...", flush=True)
+    face_embeds = []
+    for image in prepared_images:
+        # Manually encode each image
+        embeds = image_encoder(image).image_embeds
+        face_embeds.append(embeds)
+
+    # Average the embeddings of the two faces
+    positive_embeds = torch.cat(face_embeds, dim=0).mean(dim=0, keepdim=True)
+    
+    # Create negative embeddings (unconditional)
+    negative_embeds = torch.zeros_like(positive_embeds)
+    
+    # Combine for classifier-free guidance
+    ip_embeds = torch.cat([negative_embeds, positive_embeds], dim=0)
 
     # --- New, more descriptive default prompt ---
     prompt = (input_data.get("prompt") or "").strip()
@@ -63,10 +88,10 @@ def generate_kissing_video(input_data):
         result = pipe(
             prompt=prompt,
             negative_prompt=negative_prompt,
-            ip_adapter_image=pil_images, # Pass the list of PIL images directly
+            ip_adapter_image_embeds=[ip_embeds], # Pass the combined embeddings
             num_frames=16,
-            guidance_scale=7.5, # Slightly increased for better prompt adherence
-            num_inference_steps=30, # Increased for more detail
+            guidance_scale=7.5,
+            num_inference_steps=30,
         ).frames[0]
 
     video_frames = result
