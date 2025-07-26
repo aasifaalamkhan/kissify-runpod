@@ -9,14 +9,13 @@ from utils import (
     load_face_images, crop_face,
     export_video_with_imageio, upscale_video, smooth_video,
     extract_pose_sequence,
-    save_pose_sequence, load_pose_sequence # <--- Import new functions
+    save_pose_sequence, load_pose_sequence # Keep these imports for caching
 )
 
 # --- Define constants ---
 OUTPUT_DIR = "/workspace/outputs"
 MOTION_TEMPLATE_PATH = "/workspace/kissify-runpod/motion_template.mp4"
-# --- NEW: Define path for cached pose sequence ---
-CACHED_POSE_PATH = "/workspace/kissify-runpod/cached_pose_sequence.npy"
+CACHED_POSE_PATH = "/workspace/kissify-runpod/cached_pose_sequence.npy" # Path for cached pose sequence
 
 
 # --- Load Models ---
@@ -45,19 +44,26 @@ pipe = AnimateDiffPipeline.from_pretrained(
     controlnet=controlnet,
     torch_dtype=torch.float16,
 ).to(device)
-pipe.scheduler = DDIMScheduler.from_pretrained(base_model_id, subfolder="scheduler")
+pipe.scheduler = DDIMScheduler(beta_schedule="linear", num_train_timesteps=1000) # Use DDIMScheduler with default params if not specified in base model
 
-# --- IMPORTANT CHANGE: Load IP-Adapter TWICE for two separate conditions ---
+# ==============================================================================
+# 🚨🚨🚨 CRITICAL FIX STARTS HERE 🚨🚨🚨
+# LOAD IP-ADAPTER TWICE TO HAVE TWO SEPARATE IP-ADAPTERS IN THE PIPELINE
+# Each call to load_ip_adapter *adds* an adapter.
+# ==============================================================================
 pipe.load_ip_adapter(
     ip_adapter_repo_id, subfolder="models", weight_name="ip-adapter_sd15.bin"
 )
-pipe.load_ip_adapter(
+pipe.load_ip_adapter( # <--- THIS IS THE SECOND CALL TO LOAD THE SECOND IP-ADAPTER
     ip_adapter_repo_id, subfolder="models", weight_name="ip-adapter_sd15.bin"
 )
+# ==============================================================================
+# 🚨🚨🚨 CRITICAL FIX ENDS HERE 🚨🚨🚨
+# ==============================================================================
+
 print("[INFO] Models and pipeline are initialized.", flush=True)
 
 # --- Pre-process and cache the pose sequence at startup ---
-# --- NEW: Check for cached poses before extracting ---
 POSE_SEQUENCE = load_pose_sequence(CACHED_POSE_PATH)
 if POSE_SEQUENCE is None:
     POSE_SEQUENCE = extract_pose_sequence(MOTION_TEMPLATE_PATH)
@@ -96,7 +102,12 @@ def generate_kissing_video(input_data):
 
         # --- Step 3: Preparing faces for IP-Adapter (passing two distinct images) ---
         print("🔍 Step 3/5: Preparing faces for IP-Adapter...", flush=True)
+        # We now have two IP-Adapters loaded in the pipe.
+        # So we can pass the two cropped PIL images directly as a list.
+        # The pipeline will use the first image for the first IP-Adapter,
+        # and the second image for the second IP-Adapter.
         ip_adapter_images_for_pipeline = [face1_cropped, face2_cropped]
+
 
         prompt = "a man and a woman kissing, best quality, realistic, masterpiece, high resolution"
         negative_prompt = "monochrome, lowres, bad anatomy, worst quality, low quality, blurry, nsfw, text, watermark, logo"
@@ -109,8 +120,13 @@ def generate_kissing_video(input_data):
                 negative_prompt=negative_prompt,
                 image=POSE_SEQUENCE,
                 controlnet_conditioning_scale=0.8,
+                # ==============================================================================
+                # 🚨🚨🚨 CRITICAL FIX: Ensure `ip_adapter_image` is used with the list of PIL images 🚨🚨🚨
+                # ==============================================================================
                 ip_adapter_image=ip_adapter_images_for_pipeline,
-                ip_adapter_scale=1.8,
+                # You can specify a list of scales if you want different weights for each IP-Adapter:
+                # ip_adapter_scale=[1.8, 1.8], # Example: same scale for both
+                ip_adapter_scale=1.8, # This applies 1.8 to both loaded IP-Adapters
                 num_frames=NUM_FRAMES,
                 guidance_scale=5.0,
                 num_inference_steps=50,
