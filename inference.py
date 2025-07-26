@@ -20,25 +20,26 @@ print("[INFO] Initializing models and pipeline...", flush=True)
 device = "cuda"
 
 # --- NEW: Load ControlNet OpenPose Model ---
-controlnet_model_id = "thibaud/controlnet-openpose-sd-v1-1"
-controlnet = ControlNetModel.from_pretrained(controlnet_model_id, torch_dtype=torch.float32).to(device)
+# Use a valid, public ControlNet model ID
+controlnet_model_id = "lllyasviel/control-v11p-sd15-openpose"  # <-- CORRECTED THIS LINE
+controlnet = ControlNetModel.from_pretrained(controlnet_model_id, torch_dtype=torch.float16).to(device)
 
 base_model_id = "SG161222/Realistic_Vision_V5.1_noVAE"
 motion_module_id = "guoyww/animatediff-motion-adapter-v1-5-3"
 ip_adapter_repo_id = "h94/IP-Adapter"
 
 image_encoder = CLIPVisionModelWithProjection.from_pretrained(
-    ip_adapter_repo_id, subfolder="models/image_encoder", torch_dtype=torch.float32
+    ip_adapter_repo_id, subfolder="models/image_encoder", torch_dtype=torch.float16
 ).to(device).eval()
 image_processor = CLIPImageProcessor.from_pretrained("openai/clip-vit-large-patch14")
-motion_adapter = MotionAdapter.from_pretrained(motion_module_id, torch_dtype=torch.float32).to(device)
+motion_adapter = MotionAdapter.from_pretrained(motion_module_id, torch_dtype=torch.float16).to(device)
 
 # --- NEW: Inject ControlNet into the pipeline ---
 pipe = AnimateDiffPipeline.from_pretrained(
     base_model_id,
     motion_adapter=motion_adapter,
     controlnet=controlnet, # Pass the loaded controlnet
-    torch_dtype=torch.float32,
+    torch_dtype=torch.float16,
 ).to(device)
 pipe.scheduler = DDIMScheduler.from_pretrained(base_model_id, subfolder="scheduler")
 pipe.load_ip_adapter(
