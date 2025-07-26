@@ -61,19 +61,23 @@ def generate_kissing_video(input_data):
         face_embeds.append(embeds)
 
     positive_embeds = torch.cat(face_embeds, dim=0).mean(dim=0, keepdim=True)
+    
+    # --- FIX: Explicitly cast the embeddings to the pipeline's data type (float32) ---
+    positive_embeds = positive_embeds.to(dtype=pipe.dtype)
+
     positive_embeds = positive_embeds.unsqueeze(0)
     negative_embeds = torch.zeros_like(positive_embeds)
     ip_embeds = torch.cat([negative_embeds, positive_embeds], dim=0)
 
-    # --- FIX: New improved prompt and settings ---
+    # --- New improved prompt and settings ---
     prompt = (input_data.get("prompt") or "").strip()
     if not prompt:
         prompt = "masterpiece, best quality, ultra-detailed photo of a passionate kiss between a man and a woman, closed eyes, soft lighting, cinematic close-up, intimate embrace, delicate facial expressions, highly detailed, ultra-realistic, photorealistic, 4k"
     
-    # --- FIX: Tighter negative prompt ---
+    # --- Tighter negative prompt ---
     negative_prompt = "cartoon, painting, illustration, (worst quality, low quality, normal quality:2), deformed, ugly, disfigured, weird faces, open mouths, eyes open, awkward poses, stiff, blurry"
 
-    # --- FIX: Increased IP-Adapter scale for better face matching ---
+    # --- Increased IP-Adapter scale for better face matching ---
     pipe.set_ip_adapter_scale(1.5)
 
     print(f"🎨 Generating animation with prompt: '{prompt}'", flush=True)
@@ -83,8 +87,8 @@ def generate_kissing_video(input_data):
             negative_prompt=negative_prompt,
             ip_adapter_image_embeds=[ip_embeds],
             num_frames=32, # Kept at 32 due to model limitations
-            guidance_scale=5.0, # FIX: Lowered for smoother, more natural motion
-            num_inference_steps=50, # FIX: Increased for higher quality frames
+            guidance_scale=5.0, # Lowered for smoother, more natural motion
+            num_inference_steps=50, # Increased for higher quality frames
         ).frames[0]
 
     video_frames = result
@@ -93,7 +97,7 @@ def generate_kissing_video(input_data):
     filename = f"{uuid.uuid4()}.mp4"
     output_path = os.path.join(OUTPUT_DIR, filename)
     
-    # --- FIX: Increased FPS for smoother playback ---
+    # Increased FPS for smoother playback
     export_video_with_imageio(video_frames, output_path, fps=24)
 
     if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
