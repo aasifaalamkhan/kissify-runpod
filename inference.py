@@ -135,7 +135,7 @@ def generate_kissing_video(input_data):
         # Upscaling is currently skipped for faster testing
         # upscale_video(raw_video_path, upscaled_video_path)
         
-        smooth_video(raw_video_path, final_video_path, target_fps=48)
+        #smooth_video(raw_video_path, final_video_path, target_fps=48)
         
         # --- End timing and print the duration ---
         export_end_time = time.time()
