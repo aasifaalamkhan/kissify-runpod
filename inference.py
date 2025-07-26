@@ -2,7 +2,7 @@ import os
 import torch
 import uuid
 import gc
-import time  # Import the time module
+import time
 from PIL import Image
 from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler, ControlNetModel
 import numpy as np
@@ -54,17 +54,11 @@ print("✅ All models and pose data are ready.", flush=True)
 def generate_kissing_video(input_data):
     """
     Main function to generate a video based on two input face images.
-    Uses a sliding window approach and now times the final export step.
+    Uses a sliding window approach for faster, more direct generation.
     """
-    raw_video_path = None
-    upscaled_video_path = None
-
     try:
         unique_id = str(uuid.uuid4())
-        raw_filename = f"{unique_id}_raw.mp4"
         final_filename = f"{unique_id}_final.mp4"
-
-        raw_video_path = os.path.join(OUTPUT_DIR, raw_filename)
         final_video_path = os.path.join(OUTPUT_DIR, final_filename)
 
         print("🧠 Step 1/5: Loading and preparing images...", flush=True)
@@ -79,25 +73,26 @@ def generate_kissing_video(input_data):
 
         prompt = "photo of a man and a woman kissing, faces of the people from the reference image, best quality, realistic, masterpiece, high resolution"
         negative_prompt = "monochrome, lowres, bad anatomy, worst quality, low quality, blurry, nsfw, text, watermark, logo, two heads, multiple people, deformed"
-        
-        # --- Sliding Window Parameters ---
+
+        # --- Sliding Window & Speed Parameters ---
         window_size = 32
         stride = 16
+        generation_steps = 25  # Reduced from 50 for speed
         total_frames = len(POSE_SEQUENCE)
         all_frames = []
 
-        print(f"🎨 Step 2/5: Starting sliding window generation for {total_frames} frames...", flush=True)
+        print(f"🎨 Step 2/5: Starting sliding window generation for {total_frames} frames ({generation_steps} steps/chunk)...", flush=True)
         with torch.inference_mode():
             for i in range(0, total_frames - window_size + stride, stride):
                 start_index = i
                 end_index = i + window_size
-                
+
                 if end_index > total_frames:
                     start_index = max(0, total_frames - window_size)
                     end_index = total_frames
 
                 chunk_poses = POSE_SEQUENCE[start_index:end_index]
-                
+
                 if len(chunk_poses) < window_size:
                     padding_needed = window_size - len(chunk_poses)
                     chunk_poses.extend([chunk_poses[-1]] * padding_needed)
@@ -112,32 +107,30 @@ def generate_kissing_video(input_data):
                     ip_adapter_scale=1.8,
                     num_frames=window_size,
                     guidance_scale=7.0,
-                    num_inference_steps=50,
+                    num_inference_steps=generation_steps,  # FASTER
                 ).frames[0]
 
                 if i == 0:
                     all_frames.extend(output_chunk)
                 else:
                     all_frames.extend(output_chunk[-stride:])
-                
+
                 if end_index >= total_frames:
                     break
 
         video_frames = all_frames[:total_frames]
         print(f"✅ Step 3/5: Finished generation. Total frames: {len(video_frames)}", flush=True)
 
-        print("🚀 Step 4/5: Post-processing (export & smooth)...", flush=True)
-        # --- Start timing the export process ---
+        print("🚀 Step 4/5: Post-processing (exporting video)...", flush=True)
         export_start_time = time.time()
 
-        export_video_with_imageio(video_frames, raw_video_path, fps=8)
-        
-        # Upscaling is currently skipped for faster testing
+        # FIX: Export directly to the final path. No more raw/temp file.
+        export_video_with_imageio(video_frames, final_video_path, fps=8)
+
+        # NOTE: Upscaling and smoothing are disabled for performance.
         # upscale_video(raw_video_path, upscaled_video_path)
-        
-        #smooth_video(raw_video_path, final_video_path, target_fps=48)
-        
-        # --- End timing and print the duration ---
+        # smooth_video(raw_video_path, final_video_path, target_fps=48)
+
         export_end_time = time.time()
         export_duration = export_end_time - export_start_time
         print(f"✅ Post-processing finished in {export_duration:.2f} seconds.")
@@ -149,6 +142,4 @@ def generate_kissing_video(input_data):
         print("🧹 Cleaning up...", flush=True)
         gc.collect()
         torch.cuda.empty_cache()
-        if raw_video_path and os.path.exists(raw_video_path):
-            os.remove(raw_video_path)
-
+        # No raw file to clean up anymore. The final file is kept.
