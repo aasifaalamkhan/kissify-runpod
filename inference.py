@@ -47,26 +47,26 @@ pipe = AnimateDiffPipeline.from_pretrained(
 pipe.scheduler = DDIMScheduler(beta_schedule="linear", num_train_timesteps=1000)
 
 # ==============================================================================
-# 🚨🚨🚨 THE NEW ATTEMPT FOR MULTIPLE IP-ADAPTERS (for diffusers 0.28.0) 🚨🚨🚨
-# Calling `load_ip_adapter` twice *should* add two distinct adapters in 0.28.0.
-# We no longer need to import `IPAdapter` directly for this.
+# ✅ Corrected approach for multiple IP-Adapters (for diffusers >= 0.28.0)
+# We load the same weights twice but assign them unique adapter names.
+# This allows the pipeline to treat them as separate inputs.
 # ==============================================================================
-print("[INFO] Attempting to load two IP-Adapters via pipe.load_ip_adapter()...", flush=True)
+print("[INFO] Loading two IP-Adapters with distinct names...", flush=True)
 pipe.load_ip_adapter(
-    ip_adapter_repo_id, subfolder="models", weight_name="ip-adapter_sd15.bin"
+    ip_adapter_repo_id, subfolder="models", weight_name="ip-adapter_sd15.bin",
+    adapter_name="face1"  # Name for the first face
 )
-pipe.load_ip_adapter( # Second call for the second IP-Adapter
-    ip_adapter_repo_id, subfolder="models", weight_name="ip-adapter_sd15.bin"
+pipe.load_ip_adapter(
+    ip_adapter_repo_id, subfolder="models", weight_name="ip-adapter_sd15.bin",
+    adapter_name="face2"  # Name for the second face
 )
-print("[INFO] Finished IP-Adapter loading attempts.", flush=True)
 
-# VERIFICATION STEP: Check pipe.ip_adapter (should now be a list of 2)
-num_loaded_ip_adapters = 0
-if hasattr(pipe, 'ip_adapter') and isinstance(pipe.ip_adapter, list):
-    num_loaded_ip_adapters = len(pipe.ip_adapter)
-elif hasattr(pipe, 'ip_adapter') and pipe.ip_adapter is not None:
-    num_loaded_ip_adapters = 1 # Single IPAdapter object if it's not a list
-print(f"✅ [INFO] Pipeline reports {num_loaded_ip_adapters} IP-Adapters after all loads.", flush=True)
+# Set the adapters to be used and their weights.
+# The weights here replace the need for the `ip_adapter_scale` parameter later.
+ip_adapter_weight = 1.8
+pipe.set_adapters(["face1", "face2"], adapter_weights=[ip_adapter_weight, ip_adapter_weight])
+print("✅ [INFO] Pipeline is configured with 2 IP-Adapters.", flush=True)
+
 
 print("[INFO] Models and pipeline are initialized.", flush=True)
 
@@ -106,7 +106,7 @@ def generate_kissing_video(input_data):
         face2_cropped = crop_face(pil_images[1])
 
         print("🔍 Step 3/5: Preparing faces for IP-Adapter...", flush=True)
-        # Pass the list of PIL images. This should work if 2 IP-Adapters are correctly loaded.
+        # Pass the list of PIL images. This will now work as 2 IP-Adapters are correctly loaded.
         ip_adapter_images_for_pipeline = [face1_cropped, face2_cropped]
 
         prompt = "a man and a woman kissing, best quality, realistic, masterpiece, high resolution"
@@ -120,7 +120,7 @@ def generate_kissing_video(input_data):
                 image=POSE_SEQUENCE,
                 controlnet_conditioning_scale=0.8,
                 ip_adapter_image=ip_adapter_images_for_pipeline,
-                ip_adapter_scale=1.8, # This scale will apply to both adapters
+                # ip_adapter_scale is removed as weights are now set via `set_adapters`
                 num_frames=NUM_FRAMES,
                 guidance_scale=5.0,
                 num_inference_steps=50,
