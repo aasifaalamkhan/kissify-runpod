@@ -12,3 +12,4 @@ imageio-ffmpeg
 numpy<2.0
 basicsr
 realesrgan
+ffmpeg-python
