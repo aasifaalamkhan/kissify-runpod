@@ -44,30 +44,6 @@ def load_face_images(image_b64_list):
     return images
 
 
-def upload_to_catbox(file_path, max_retries=3, delay=3):
-    url = "https://catbox.moe/user/api.php"
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            with open(file_path, "rb") as f:
-                response = requests.post(
-                    url,
-                    data={"reqtype": "fileupload"},
-                    files={"fileToUpload": f},
-                    timeout=30
-                )
-            if response.status_code == 200 and response.text.startswith("https://"):
-                return response.text.strip()
-            else:
-                raise RuntimeError(f"Catbox upload failed with status {response.status_code}: {response.text}")
-        except Exception as e:
-            if attempt < max_retries:
-                print(f"[WARN] Upload attempt {attempt} failed: {e}")
-                time.sleep(delay)
-            else:
-                raise RuntimeError(f"Catbox upload failed after {max_retries} attempts: {e}")
-
-
 def export_video_with_opencv(video_frames, output_path, fps):
     """
     Manually exports video frames using OpenCV to ensure codec compatibility.
@@ -75,20 +51,18 @@ def export_video_with_opencv(video_frames, output_path, fps):
     if not video_frames:
         raise ValueError("Input video_frames list is empty.")
     
-    # Get frame size from the first image
     first_frame = video_frames[0]
     height, width, layers = np.array(first_frame).shape
     size = (width, height)
     
-    # --- FIX: Switched to a more compatible H.264 codec ('avc1') ---
-    fourcc = cv2.VideoWriter_fourcc(*'avc1') 
+    # --- Reverted to the 'mp4v' codec, which FFMPEG provides ---
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
     out = cv2.VideoWriter(output_path, fourcc, fps, size)
     
     for frame_pil in video_frames:
-        # Convert PIL Image (RGB) to OpenCV format (BGR)
         frame_np = np.array(frame_pil)
         frame_bgr = cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR)
         out.write(frame_bgr)
         
-    out.release() # Release the VideoWriter
-    print(f"Video saved to {output_path} using OpenCV with avc1 codec.")
+    out.release()
+    print(f"Video saved to {output_path} using OpenCV with mp4v codec.")
