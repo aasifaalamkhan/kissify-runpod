@@ -13,13 +13,15 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # --- Pre-load and Warm-up Model ---
 print("[INFO] Loading model to GPU for the first time...")
-pipe.to("cuda")
+# The pipe is already moved to the GPU in inference.py
 
 print("[INFO] Performing warm-up inference step...")
 with torch.inference_mode():
-    positive_embeds = torch.randn(1, 1, 1024, dtype=torch.float16, device="cuda")
+    # --- FIX: Create dummy embeddings with the same dtype as the pipeline (float32) ---
+    positive_embeds = torch.randn(1, 1, 1, 1024, dtype=pipe.dtype, device="cuda")
     negative_embeds = torch.zeros_like(positive_embeds)
     dummy_ip_adapter_embeds = torch.cat([negative_embeds, positive_embeds], dim=0)
+    
     pipe(
         prompt="warmup",
         num_inference_steps=1,
@@ -30,13 +32,13 @@ torch.cuda.empty_cache()
 print("✅ [INFO] Model is warmed up and ready.")
 
 
-# --- New Route to Serve Video Files ---
+# --- Route to Serve Video Files ---
 @app.route('/outputs/<path:filename>')
 def serve_video(filename):
     """
     Serves a video file from the output directory.
     """
-    print(f"Serving file: {filename} from {OUTPUT_DIR}")
+    print(f"Serving file: {filename} from {OUTPUT_DIR}", flush=True)
     return send_from_directory(OUTPUT_DIR, filename, as_attachment=False)
 
 
@@ -57,26 +59,17 @@ def handle_generation():
         if not filename:
             raise RuntimeError("Generation succeeded but did not return a filename.")
 
-        # --- FIX: Construct the public URL correctly using proxy headers ---
-        # The 'X-Forwarded-Proto' and 'X-Forwarded-Host' headers are added by the RunPod proxy
-        # and tell us the original public URL.
         proto = request.headers.get("X-Forwarded-Proto", "http")
         host = request.headers.get("X-Forwarded-Host", request.host)
-        
-        # Create the correct base URL (e.g., https://your-pod-proxy.runpod.net)
         base_url = f"{proto}://{host}"
-        
-        # Create the full path to the video file
         video_path = url_for('serve_video', filename=filename)
-        
-        # Combine them for the final, public URL
         video_url = f"{base_url}{video_path}"
         
-        print(f"Generated public video URL: {video_url}")
+        print(f"Generated public video URL: {video_url}", flush=True)
         return jsonify({"video_url": video_url})
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"An error occurred: {e}", flush=True)
         return jsonify({"error": f"An error occurred during generation: {str(e)}"}), 500
 
 
