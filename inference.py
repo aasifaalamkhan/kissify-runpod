@@ -4,8 +4,7 @@ import uuid # For generating unique filenames
 from PIL import Image
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler
-# --- Import the new imageio exporter ---
-from utils import load_face_images, prepare_ip_adapter_inputs, export_video_with_imageio
+from utils import load_face_images, export_video_with_imageio
 
 # Define the directory where videos will be stored
 OUTPUT_DIR = "/workspace/outputs"
@@ -19,12 +18,7 @@ motion_module_id = "guoyww/animatediff-motion-adapter-v1-5-3"
 ip_adapter_repo_id = "h94/IP-Adapter"
 device = "cuda"
 
-image_encoder = CLIPVisionModelWithProjection.from_pretrained(
-    ip_adapter_repo_id, subfolder="models/image_encoder", torch_dtype=torch.float16
-).to(device).eval()
-
-image_processor = CLIPImageProcessor.from_pretrained("openai/clip-vit-large-patch14")
-
+# We no longer need to load the image encoder separately, the pipeline handles it.
 motion_adapter = MotionAdapter.from_pretrained(motion_module_id, torch_dtype=torch.float16).to(device)
 
 pipe = AnimateDiffPipeline.from_pretrained(
@@ -33,61 +27,54 @@ pipe = AnimateDiffPipeline.from_pretrained(
     torch_dtype=torch.float16
 )
 pipe.scheduler = DDIMScheduler.from_pretrained(base_model_id, subfolder="scheduler")
+pipe.enable_model_cpu_offload() # Re-enable CPU offload to save VRAM
+
+# Load the IP-Adapter
 pipe.load_ip_adapter(
     ip_adapter_repo_id,
     subfolder="models",
     weight_name="ip-adapter_sd15.bin"
 )
-pipe.set_ip_adapter_scale(1.0)
 
 print("[INFO] Models and pipeline are initialized.", flush=True)
 
 # ========= Video Generation Logic =========
 def generate_kissing_video(input_data):
-    print("🧠 Loading and preparing face images...", flush=True)
-    face_images = load_face_images([
+    # --- Simplified logic: Pass PIL images directly to the pipeline ---
+    print("🧠 Loading face images...", flush=True)
+    pil_images = load_face_images([
         input_data['face_image1'],
         input_data['face_image2']
     ])
-    face_images = prepare_ip_adapter_inputs(face_images, device)
 
-    print("🔍 Encoding faces with IP-Adapter...", flush=True)
-    face_embeds = []
-    for face in face_images:
-        inputs = image_processor(face, return_tensors="pt", do_rescale=False).to(device)
-        embeds = image_encoder(**inputs).image_embeds
-        face_embeds.append(embeds)
-
-    stacked_embeds = torch.cat(face_embeds, dim=0).mean(dim=0, keepdim=True)
-    stacked_embeds = stacked_embeds.unsqueeze(0)
-    negative_embeds = torch.zeros_like(stacked_embeds)
-    ip_embeds = torch.cat([negative_embeds, stacked_embeds], dim=0)
-
+    # --- New, more descriptive default prompt ---
     prompt = (input_data.get("prompt") or "").strip()
     if not prompt:
-        prompt = "romantic kiss, closeup, cinematic, photorealistic, 4k, trending on artstation"
+        prompt = "photo of a man and a woman in a passionate, romantic kiss, closeup, cinematic lighting, high detail, 4k"
     
-    negative_prompt = "bad quality, worse quality, low resolution, deformed, ugly"
+    # --- New, more specific negative prompt ---
+    negative_prompt = "cartoon, painting, illustration, (worst quality, low quality, normal quality:2), deformed, ugly, disfigured, weird faces, open mouths, not kissing, two men, two women, blurry, duplicate"
+
+    # --- Adjust IP-Adapter scale for stronger face influence ---
+    pipe.set_ip_adapter_scale(1.2)
 
     print(f"🎨 Generating animation with prompt: '{prompt}'", flush=True)
     with torch.inference_mode():
         result = pipe(
             prompt=prompt,
             negative_prompt=negative_prompt,
+            ip_adapter_image=pil_images, # Pass the list of PIL images directly
             num_frames=16,
-            guidance_scale=7.0,
-            num_inference_steps=25,
-            ip_adapter_image_embeds=[ip_embeds]
+            guidance_scale=7.5, # Slightly increased for better prompt adherence
+            num_inference_steps=30, # Increased for more detail
         ).frames[0]
 
     video_frames = result
-    # --- Use imageio to export the MP4 ---
     print("💾 Exporting video to local storage as MP4 using imageio...", flush=True)
     
     filename = f"{uuid.uuid4()}.mp4"
     output_path = os.path.join(OUTPUT_DIR, filename)
     
-    # Use our new, more robust imageio export function
     export_video_with_imageio(video_frames, output_path, fps=8)
 
     if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
