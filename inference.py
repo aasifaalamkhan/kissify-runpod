@@ -52,10 +52,10 @@ pipe.load_ip_adapter(ip_adapter_repo_id, subfolder="models", weight_name="ip-ada
 # Load and combine BOTH Kissing LoRAs
 print("[INFO] Loading and combining two Kissing LoRAs...", flush=True)
 pipe.load_lora_weights("Remade-AI/kissing", weight_name="kissing_30_epochs.safetensors", adapter_name="style")
-# FIX: Corrected the filename for the second LoRA.
 pipe.load_lora_weights("ighoshsubho/Wan-I2V-LoRA-Kiss", weight_name="i2v-custom-lora.safetensors", adapter_name="motion")
 
-pipe.set_adapters(["style", "motion"], adapter_weights=[0.6, 0.6])
+# FIX: Increase the LoRA weights for a stronger effect.
+pipe.set_adapters(["style", "motion"], adapter_weights=[0.8, 0.8])
 
 pipe.fuse_lora()
 
@@ -93,8 +93,8 @@ def generate_kissing_video(input_data):
         composite_image.save(composite_image_path)
         yield {'composite_filename': composite_filename}
 
-
-        prompt = "photo of a man and a woman kissing, faces of the people from the reference image, best quality, realistic, masterpiece, high resolution"
+        # FIX: Use a descriptive prompt with the specific LoRA trigger phrase.
+        prompt = "A man and a woman are embracing. They are k144ing kissing, while still embracing each other. faces of the people from the reference image, best quality, realistic, masterpiece, high resolution"
         negative_prompt = "monochrome, lowres, bad anatomy, worst quality, low quality, blurry, nsfw, text, watermark, logo, two heads, multiple people, deformed"
 
         # --- Sliding Window & Speed Parameters ---
@@ -129,7 +129,8 @@ def generate_kissing_video(input_data):
                     ip_adapter_image=composite_image,
                     ip_adapter_scale=0.7,
                     num_frames=window_size,
-                    guidance_scale=7.0,
+                    # FIX: Adjust guidance scale to match LoRA recommendation.
+                    guidance_scale=6.0,
                     num_inference_steps=generation_steps,
                 ).frames[0]
 
