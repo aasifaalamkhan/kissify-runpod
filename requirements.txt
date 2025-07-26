@@ -7,3 +7,5 @@ Pillow
 requests
 Flask
 opencv-python
+imageio
+imageio-ffmpeg
