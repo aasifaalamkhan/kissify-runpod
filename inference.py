@@ -55,7 +55,15 @@ def generate_kissing_video(input_data):
         embeds = image_encoder(**inputs).image_embeds
         face_embeds.append(embeds)
 
+    # This is the positive embedding
     stacked_embeds = torch.cat(face_embeds, dim=0).mean(dim=0, keepdim=True)
+
+    # --- FIX: Create negative embeddings and combine with positive embeddings ---
+    # Create a tensor of zeros for the negative embeddings
+    negative_embeds = torch.zeros_like(stacked_embeds)
+    # Combine them into a single tensor for the pipeline
+    ip_embeds = torch.cat([negative_embeds, stacked_embeds], dim=0)
+
 
     prompt = (input_data.get("prompt") or "").strip()
     if not prompt:
@@ -71,7 +79,7 @@ def generate_kissing_video(input_data):
             num_frames=16,
             guidance_scale=7.0,
             num_inference_steps=25,
-            ip_adapter_image_embeds=[stacked_embeds]
+            ip_adapter_image_embeds=[ip_embeds] # Use the combined embeddings
         ).frames[0]
 
     video_frames = result
