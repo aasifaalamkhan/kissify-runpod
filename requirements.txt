@@ -13,3 +13,5 @@ numpy<2.0
 basicsr
 realesrgan
 ffmpeg-python
+facenet-pytorch
+controlnet-aux
