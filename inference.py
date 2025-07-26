@@ -4,10 +4,8 @@ import uuid
 import gc
 from PIL import Image
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
-
-# --- CRITICAL FIX: Correct import path for IPAdapter ---
+# Revert to simpler import as IPAdapter class won't be explicitly needed for this strategy
 from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler, ControlNetModel
-from diffusers.models.attention_processor import IPAdapter # THIS IS THE CORRECTED AND VERIFIED IMPORT!
 
 from utils import (
     load_face_images, crop_face,
@@ -49,47 +47,26 @@ pipe = AnimateDiffPipeline.from_pretrained(
 pipe.scheduler = DDIMScheduler(beta_schedule="linear", num_train_timesteps=1000)
 
 # ==============================================================================
-# 🚨🚨🚨 THE DEFINITIVE FIX FOR LOADING MULTIPLE IP-ADAPTERS (explicit instance creation) 🚨🚨🚨
-# This method directly creates two IPAdapter instances and assigns them to the pipeline,
-# bypassing any ambiguity with `pipe.load_ip_adapter` for multiple adapters in this version.
+# 🚨🚨🚨 THE NEW ATTEMPT FOR MULTIPLE IP-ADAPTERS (for diffusers 0.28.0) 🚨🚨🚨
+# Calling `load_ip_adapter` twice *should* add two distinct adapters in 0.28.0.
+# We no longer need to import `IPAdapter` directly for this.
 # ==============================================================================
+print("[INFO] Attempting to load two IP-Adapters via pipe.load_ip_adapter()...", flush=True)
+pipe.load_ip_adapter(
+    ip_adapter_repo_id, subfolder="models", weight_name="ip-adapter_sd15.bin"
+)
+pipe.load_ip_adapter( # Second call for the second IP-Adapter
+    ip_adapter_repo_id, subfolder="models", weight_name="ip-adapter_sd15.bin"
+)
+print("[INFO] Finished IP-Adapter loading attempts.", flush=True)
 
-print("[INFO] Loading individual IP-Adapter models...", flush=True)
-
-# Ensure the IP-Adapter weights are correctly located
-ip_adapter_weight_path = os.path.join(ip_adapter_repo_id, "models", "ip-adapter_sd15.bin")
-
-# Create the first IPAdapter instance
-ip_adapter_model1 = IPAdapter(
-    pipe.unet, # The UNet of the pipeline
-    image_encoder.to(pipe.device, dtype=pipe.dtype), # The image encoder for CLIP embeddings
-    ip_adapter_weight_path, # Path to the IP-Adapter weights
-    # For IPAdapter class, it expects the full path to the .bin file, not repo/subfolder/weight_name
-    torch_dtype=pipe.dtype # Match pipeline dtype
-).to(device)
-
-# Create the second IPAdapter instance (duplicate for a second distinct condition)
-ip_adapter_model2 = IPAdapter(
-    pipe.unet,
-    image_encoder.to(pipe.device, dtype=pipe.dtype),
-    ip_adapter_weight_path,
-    torch_dtype=pipe.dtype
-).to(device)
-
-# Assign the list of IPAdapter instances to the pipeline's 'ip_adapter' attribute
-# This is how the pipeline knows to use multiple IP-Adapters.
-pipe.ip_adapter = [ip_adapter_model1, ip_adapter_model2]
-pipe.image_processor_ip_adapter = image_processor # Also ensure the image processor is set for internal use
-
-
-# VERIFICATION STEP: Print the actual number of IP-Adapters detected by the pipeline
+# VERIFICATION STEP: Check pipe.ip_adapter (should now be a list of 2)
 num_loaded_ip_adapters = 0
 if hasattr(pipe, 'ip_adapter') and isinstance(pipe.ip_adapter, list):
     num_loaded_ip_adapters = len(pipe.ip_adapter)
 elif hasattr(pipe, 'ip_adapter') and pipe.ip_adapter is not None:
     num_loaded_ip_adapters = 1 # Single IPAdapter object if it's not a list
-print(f"✅ [INFO] Pipeline reports {num_loaded_ip_adapters} IP-Adapters after all loads (manual).", flush=True)
-
+print(f"✅ [INFO] Pipeline reports {num_loaded_ip_adapters} IP-Adapters after all loads.", flush=True)
 
 print("[INFO] Models and pipeline are initialized.", flush=True)
 
@@ -129,8 +106,7 @@ def generate_kissing_video(input_data):
         face2_cropped = crop_face(pil_images[1])
 
         print("🔍 Step 3/5: Preparing faces for IP-Adapter...", flush=True)
-        # Pass the list of PIL images to ip_adapter_image.
-        # The pipeline, now configured with two IPAdapter instances, will correctly map them.
+        # Pass the list of PIL images. This should work if 2 IP-Adapters are correctly loaded.
         ip_adapter_images_for_pipeline = [face1_cropped, face2_cropped]
 
         prompt = "a man and a woman kissing, best quality, realistic, masterpiece, high resolution"
