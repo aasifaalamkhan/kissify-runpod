@@ -4,8 +4,7 @@ import uuid # For generating unique filenames
 from PIL import Image
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler
-# The custom opencv exporter is no longer needed
-from utils import load_face_images, prepare_ip_adapter_inputs
+from utils import load_face_images, prepare_ip_adapter_inputs, export_video_with_opencv
 
 # Define the directory where videos will be stored
 OUTPUT_DIR = "/workspace/outputs"
@@ -81,29 +80,21 @@ def generate_kissing_video(input_data):
         ).frames[0]
 
     video_frames = result
-    print("💾 Exporting animation to GIF...")
+    print("💾 Exporting video to local storage as MP4...")
     
-    # --- FIX: Save as a GIF to bypass video codec issues ---
-    filename = f"{uuid.uuid4()}.gif"
+    # --- Reverted to creating an MP4 file ---
+    filename = f"{uuid.uuid4()}.mp4"
     output_path = os.path.join(OUTPUT_DIR, filename)
     
-    # Use Pillow to save the frames as an animated GIF
-    # duration is in milliseconds (1000ms / 8fps = 125ms)
-    video_frames[0].save(
-        output_path, 
-        save_all=True, 
-        append_images=video_frames[1:], 
-        duration=125, 
-        loop=0
-    )
+    # Use our reliable OpenCV exporter
+    export_video_with_opencv(video_frames, output_path, fps=8)
 
     if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-        raise RuntimeError("GIF export failed: The output file is missing or empty.")
+        raise RuntimeError("MP4 export failed: The output file is missing or empty.")
     
-    print(f"✅ GIF exported successfully to {output_path}. Size: {os.path.getsize(output_path)} bytes.")
+    print(f"✅ MP4 exported successfully to {output_path}. Size: {os.path.getsize(output_path)} bytes.")
 
     torch.cuda.empty_cache()
 
     print("✅ Done!")
-    # --- Return the filename instead of a Catbox URL ---
     return {"filename": filename}
