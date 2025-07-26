@@ -1,6 +1,7 @@
 import os
-from flask import Flask, request, jsonify, send_from_directory, url_for
-from inference import generate_kissing_video, pipe  # This line loads and prepares the model
+from flask import Flask, request, jsonify, send_from_directory, url_for, Response, stream_with_context
+from inference import generate_kissing_video, pipe # This line loads and prepares the model
+import json
 
 app = Flask(__name__)
 
@@ -20,39 +21,53 @@ def serve_video(filename):
     return send_from_directory(OUTPUT_DIR, filename, as_attachment=False)
 
 
-# --- Main API Route ---
+# --- Main API Route (MODIFIED FOR STREAMING) ---
 @app.route('/generate', methods=['POST'])
 def handle_generation():
     """
     The main API endpoint for video generation.
+    NOW STREAMS progress back to the client.
     """
     data = request.get_json()
     if not data or 'face_image1' not in data or 'face_image2' not in data:
         return jsonify({"error": "Request must include 'face_image1' and 'face_image2'"}), 400
 
-    try:
-        result = generate_kissing_video(data)
-        filename = result.get("filename")
+    def generate_stream():
+        final_filename = None
+        try:
+            # The inference function now yields its progress
+            for log_message in generate_kissing_video(data):
+                # Check if the message is the final result or a log
+                if isinstance(log_message, dict) and 'filename' in log_message:
+                    final_filename = log_message['filename']
+                    yield f"data: {json.dumps({'status': 'Done'})}\n\n" # Signal completion
+                else:
+                    # Send progress updates as Server-Sent Events (SSE)
+                    yield f"data: {json.dumps({'status': log_message})}\n\n"
 
-        if not filename:
-            raise RuntimeError("Generation succeeded but did not return a filename.")
+            if not final_filename:
+                 raise RuntimeError("Generation finished but did not return a filename.")
 
-        # This logic correctly constructs the public URL for RunPod
-        proto = request.headers.get("X-Forwarded-Proto", "http")
-        host = request.headers.get("X-Forwarded-Host", request.host)
-        base_url = f"{proto}://{host}"
-        video_path = url_for('serve_video', filename=filename)
-        video_url = f"{base_url.rstrip('/')}{video_path}"
+            # Construct the final URL once generation is complete
+            proto = request.headers.get("X-Forwarded-Proto", "http")
+            host = request.headers.get("X-Forwarded-Host", request.host)
+            base_url = f"{proto}://{host}"
+            video_path = url_for('serve_video', filename=final_filename)
+            video_url = f"{base_url.rstrip('/')}{video_path}"
 
-        print(f"Generated public video URL: {video_url}", flush=True)
-        return jsonify({"video_url": video_url})
+            # Yield the final URL as the last message
+            final_payload = {"video_url": video_url}
+            yield f"data: {json.dumps(final_payload)}\n\n"
 
-    except Exception as e:
-        print(f"An error occurred: {e}", flush=True)
-        # It's helpful to see the full traceback in the server logs for debugging
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": f"An error occurred during generation: {str(e)}"}), 500
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            error_message = f"An error occurred during generation: {str(e)}"
+            # Yield the error message
+            yield f"data: {json.dumps({'error': error_message})}\n\n"
+
+    # Return a streaming response
+    return Response(stream_with_context(generate_stream()), mimetype='text/event-stream')
 
 
 # --- Start Server ---

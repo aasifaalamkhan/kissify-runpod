@@ -50,18 +50,18 @@ if POSE_SEQUENCE is None:
 print("✅ All models and pose data are ready.", flush=True)
 
 
-# ========= Video Generation Logic =========
+# ========= Video Generation Logic (MODIFIED TO BE A GENERATOR) =========
 def generate_kissing_video(input_data):
     """
-    Main function to generate a video based on two input face images.
-    Uses a sliding window approach for faster, more direct generation.
+    Main function to generate a video.
+    NOW YIELDS its progress logs and returns the final filename.
     """
     try:
         unique_id = str(uuid.uuid4())
         final_filename = f"{unique_id}_final.mp4"
         final_video_path = os.path.join(OUTPUT_DIR, final_filename)
 
-        print("🧠 Step 1/5: Loading and preparing images...", flush=True)
+        yield "🧠 Step 1/5: Loading and preparing images..."
         face_images_b64 = [input_data['face_image1'], input_data['face_image2']]
         pil_images = load_face_images(face_images_b64)
         face1_cropped = crop_face(pil_images[0]).resize((224, 224))
@@ -81,7 +81,7 @@ def generate_kissing_video(input_data):
         total_frames = len(POSE_SEQUENCE)
         all_frames = []
 
-        print(f"🎨 Step 2/5: Starting sliding window generation for {total_frames} frames ({generation_steps} steps/chunk)...", flush=True)
+        yield f"🎨 Step 2/5: Starting sliding window generation for {total_frames} frames ({generation_steps} steps/chunk)..."
         with torch.inference_mode():
             for i in range(0, total_frames - window_size + stride, stride):
                 start_index = i
@@ -97,14 +97,14 @@ def generate_kissing_video(input_data):
                     padding_needed = window_size - len(chunk_poses)
                     chunk_poses.extend([chunk_poses[-1]] * padding_needed)
 
-                print(f"  -> Generating chunk for frames {start_index} to {end_index-1}...", flush=True)
+                yield f"  -> Generating chunk for frames {start_index} to {end_index-1}..."
                 output_chunk = pipe(
                     prompt=prompt,
                     negative_prompt=negative_prompt,
                     image=chunk_poses,
-                    controlnet_conditioning_scale=0.9,  # FIX: Increased for better pose adherence
+                    controlnet_conditioning_scale=0.9,
                     ip_adapter_image=composite_image,
-                    ip_adapter_scale=0.8,               # FIX: Drastically reduced to prevent artifacts
+                    ip_adapter_scale=0.8,
                     num_frames=window_size,
                     guidance_scale=7.0,
                     num_inference_steps=generation_steps,
@@ -119,21 +119,19 @@ def generate_kissing_video(input_data):
                     break
 
         video_frames = all_frames[:total_frames]
-        print(f"✅ Step 3/5: Finished generation. Total frames: {len(video_frames)}", flush=True)
+        yield f"✅ Step 3/5: Finished generation. Total frames: {len(video_frames)}"
 
-        print("🚀 Step 4/5: Post-processing (exporting video)...", flush=True)
-        export_start_time = time.time()
-
+        yield "🚀 Step 4/5: Post-processing (exporting video)..."
+        
         export_video_with_imageio(video_frames, final_video_path, fps=8)
-
-        export_end_time = time.time()
-        export_duration = export_end_time - export_start_time
-        print(f"✅ Post-processing finished in {export_duration:.2f} seconds.")
-
-        print("✅ Step 5/5: Done!", flush=True)
-        return {"filename": final_filename}
+        
+        yield "✅ Post-processing finished."
+        yield "✅ Step 5/5: Done!"
+        
+        # YIELD THE FINAL RESULT AS A DICTIONARY
+        yield {"filename": final_filename}
 
     finally:
-        print("🧹 Cleaning up...", flush=True)
+        yield "🧹 Cleaning up..."
         gc.collect()
         torch.cuda.empty_cache()
