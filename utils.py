@@ -55,8 +55,8 @@ def export_video_with_opencv(video_frames, output_path, fps):
     height, width, layers = np.array(first_frame).shape
     size = (width, height)
     
-    # --- Reverted to the 'mp4v' codec, which FFMPEG provides ---
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
+    # --- Trying the 'avc1' (H.264) codec as a more compatible alternative ---
+    fourcc = cv2.VideoWriter_fourcc(*'avc1') 
     out = cv2.VideoWriter(output_path, fourcc, fps, size)
     
     for frame_pil in video_frames:
@@ -65,4 +65,4 @@ def export_video_with_opencv(video_frames, output_path, fps):
         out.write(frame_bgr)
         
     out.release()
-    print(f"Video saved to {output_path} using OpenCV with mp4v codec.")
+    print(f"Video saved to {output_path} using OpenCV with avc1 codec.")
