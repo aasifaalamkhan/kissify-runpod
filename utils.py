@@ -6,7 +6,8 @@ import requests
 import time
 from torchvision import transforms
 import numpy as np
-import cv2 # Import OpenCV
+import cv2 # Still needed for color conversion if we use it
+import imageio # Import the new library
 
 def prepare_ip_adapter_inputs(images, device="cuda"):
     """
@@ -44,26 +45,20 @@ def load_face_images(image_b64_list):
     return images
 
 
-def export_video_with_opencv(video_frames, output_path, fps):
+def export_video_with_imageio(video_frames, output_path, fps):
     """
-    Manually exports video frames using OpenCV to ensure codec compatibility.
+    Exports video frames using imageio, which is often more robust at finding ffmpeg.
     """
     if not video_frames:
         raise ValueError("Input video_frames list is empty.")
-    
-    first_frame = video_frames[0]
-    height, width, layers = np.array(first_frame).shape
-    size = (width, height)
-    
-    # --- Trying the 'avc1' (H.264) codec as a more compatible alternative ---
-    fourcc = cv2.VideoWriter_fourcc(*'avc1') 
-    out = cv2.VideoWriter(output_path, fourcc, fps, size)
-    
-    for frame_pil in video_frames:
-        frame_np = np.array(frame_pil)
-        frame_bgr = cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR)
-        out.write(frame_bgr)
-        
-    out.release()
-    # Add flush=True to ensure this message appears immediately
-    print(f"Video saved to {output_path} using OpenCV with avc1 codec.", flush=True)
+
+    # imageio expects a list of numpy arrays
+    numpy_frames = [np.array(frame) for frame in video_frames]
+
+    # Use imageio to write the video file.
+    # The 'ffmpeg' plugin will be used automatically if imageio-ffmpeg is installed.
+    # The macro_block_size=None is a common fix for "odd-sized video frames" errors.
+    print(f"Attempting to save video with imageio to {output_path}...", flush=True)
+    imageio.mimwrite(output_path, numpy_frames, fps=fps, quality=8, macro_block_size=None)
+    print(f"Video saved to {output_path} using imageio.", flush=True)
+
