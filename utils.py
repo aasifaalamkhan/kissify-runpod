@@ -52,13 +52,19 @@ def export_video_with_imageio(video_frames, output_path, fps):
     if not video_frames:
         raise ValueError("Input video_frames list is empty.")
 
-    # imageio expects a list of numpy arrays
     numpy_frames = [np.array(frame) for frame in video_frames]
 
-    # Use imageio to write the video file.
-    # The 'ffmpeg' plugin will be used automatically if imageio-ffmpeg is installed.
-    # The macro_block_size=None is a common fix for "odd-sized video frames" errors.
     print(f"Attempting to save video with imageio to {output_path}...", flush=True)
-    imageio.mimwrite(output_path, numpy_frames, fps=fps, quality=8, macro_block_size=None)
+    
+    # --- FIX: Explicitly set the pixel format to the most compatible option ---
+    imageio.mimwrite(
+        output_path, 
+        numpy_frames, 
+        fps=fps, 
+        quality=8, 
+        macro_block_size=None,
+        pix_fmt='yuv420p' # Add this line for maximum browser compatibility
+    )
+    
     print(f"Video saved to {output_path} using imageio.", flush=True)
 
