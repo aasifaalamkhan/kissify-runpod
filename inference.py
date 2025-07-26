@@ -4,7 +4,6 @@ import uuid
 import gc
 import time
 from PIL import Image
-# Import the new DPM++ scheduler
 from diffusers import AnimateDiffPipeline, MotionAdapter, ControlNetModel, DPMSolverMultistepScheduler
 import numpy as np
 
@@ -40,11 +39,10 @@ pipe = AnimateDiffPipeline.from_pretrained(
     torch_dtype=torch.float16,
 ).to(device)
 
-# FIX: Add the required 'final_sigmas_type' parameter to resolve the error.
 pipe.scheduler = DPMSolverMultistepScheduler.from_config(
-    pipe.scheduler.config, 
+    pipe.scheduler.config,
     use_karras_sigmas=True,
-    final_sigmas_type='sigma_min' 
+    final_sigmas_type='sigma_min'
 )
 
 
@@ -53,8 +51,9 @@ pipe.load_ip_adapter(ip_adapter_repo_id, subfolder="models", weight_name="ip-ada
 
 # Load and combine BOTH Kissing LoRAs
 print("[INFO] Loading and combining two Kissing LoRAs...", flush=True)
-pipe.load_lora_weights("Remade-AI/kissing", weight_name="Kissing.safetensors", adapter_name="style")
-pipe.load_lora_weights("ighoshsubho/Wan-I2V-LoRA-Kiss", weight_name="wan-i2v-lora-kiss.safetensors", adapter_name="motion")
+pipe.load_lora_weights("Remade-AI/kissing", weight_name="kissing_30_epochs.safetensors", adapter_name="style")
+# FIX: Corrected the filename for the second LoRA.
+pipe.load_lora_weights("ighoshsubho/Wan-I2V-LoRA-Kiss", weight_name="i2v-custom-lora.safetensors", adapter_name="motion")
 
 pipe.set_adapters(["style", "motion"], adapter_weights=[0.6, 0.6])
 
