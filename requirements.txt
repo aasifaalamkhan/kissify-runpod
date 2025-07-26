@@ -10,3 +10,5 @@ opencv-python
 imageio
 imageio-ffmpeg
 numpy<2.0
+basicsr
+realesrgan
