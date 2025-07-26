@@ -4,6 +4,7 @@ import uuid
 import gc
 from PIL import Image
 from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler, ControlNetModel
+import numpy as np
 
 from utils import (
     load_face_images, crop_face,
@@ -38,12 +39,9 @@ pipe = AnimateDiffPipeline.from_pretrained(
 ).to(device)
 pipe.scheduler = DDIMScheduler(beta_schedule="linear", num_train_timesteps=1000)
 
-# --- WORKAROUND: Load only ONE IP-Adapter ---
 print("[INFO] WORKAROUND: Loading only ONE IP-Adapter.", flush=True)
 pipe.load_ip_adapter(ip_adapter_repo_id, subfolder="models", weight_name="ip-adapter_sd15.bin")
 
-# --- Pre-process and cache the pose sequence for ControlNet ---
-# We still load the full sequence, but will only use the first 32 poses
 POSE_SEQUENCE = load_pose_sequence(CACHED_POSE_PATH)
 if POSE_SEQUENCE is None:
     POSE_SEQUENCE = extract_pose_sequence(MOTION_TEMPLATE_PATH)
@@ -55,7 +53,7 @@ print("✅ All models and pose data are ready.", flush=True)
 def generate_kissing_video(input_data):
     """
     Main function to generate a video based on two input face images.
-    Uses ControlNet for motion and a composite image for face identity.
+    Uses a sliding window approach to generate videos longer than the model's context limit.
     """
     raw_video_path = None
     upscaled_video_path = None
@@ -70,15 +68,12 @@ def generate_kissing_video(input_data):
         upscaled_video_path = os.path.join(OUTPUT_DIR, upscaled_filename)
         final_video_path = os.path.join(OUTPUT_DIR, final_filename)
 
-        print("🧠 Step 1/5: Loading images...", flush=True)
+        print("🧠 Step 1/5: Loading and preparing images...", flush=True)
         face_images_b64 = [input_data['face_image1'], input_data['face_image2']]
         pil_images = load_face_images(face_images_b64)
-
-        print("👤 Step 2/5: Cropping faces...", flush=True)
         face1_cropped = crop_face(pil_images[0]).resize((224, 224))
         face2_cropped = crop_face(pil_images[1]).resize((224, 224))
 
-        print("🔍 Step 3/5: Creating composite image...", flush=True)
         composite_image = Image.new('RGB', (448, 224))
         composite_image.paste(face1_cropped, (0, 0))
         composite_image.paste(face2_cropped, (224, 0))
@@ -86,37 +81,70 @@ def generate_kissing_video(input_data):
         prompt = "photo of a man and a woman kissing, faces of the people from the reference image, best quality, realistic, masterpiece, high resolution"
         negative_prompt = "monochrome, lowres, bad anatomy, worst quality, low quality, blurry, nsfw, text, watermark, logo, two heads, multiple people, deformed"
         
-        # We need to slice the pose sequence to match the number of frames
-        num_frames_to_generate = 32
-        pose_sequence_for_generation = POSE_SEQUENCE[:num_frames_to_generate]
+        # --- Sliding Window Parameters ---
+        window_size = 32  # The model's context limit
+        stride = 16       # How many frames to advance each time (overlap is window_size - stride)
+        total_frames = len(POSE_SEQUENCE)
+        all_frames = []
 
-        print(f"🎨 Step 4/5: Generating animation ({num_frames_to_generate} frames)...", flush=True)
+        print(f"🎨 Step 2/5: Starting sliding window generation for {total_frames} frames...", flush=True)
         with torch.inference_mode():
-            output = pipe(
-                prompt=prompt,
-                negative_prompt=negative_prompt,
-                image=pose_sequence_for_generation, # Using the sliced pose sequence
-                controlnet_conditioning_scale=0.8,
-                ip_adapter_image=composite_image,
-                ip_adapter_scale=1.8,
-                num_frames=num_frames_to_generate, # FIX: Hard-coded to the model's limit
-                guidance_scale=7.0,
-                num_inference_steps=50,
-            ).frames[0]
-        video_frames = output
+            for i in range(0, total_frames - window_size + stride, stride):
+                start_index = i
+                end_index = i + window_size
+                
+                # Ensure we don't go past the end of the pose sequence
+                if end_index > total_frames:
+                    start_index = max(0, total_frames - window_size)
+                    end_index = total_frames
 
-        print("🚀 Step 5/5: Post-processing (upscale & smooth)...", flush=True)
+                chunk_poses = POSE_SEQUENCE[start_index:end_index]
+                
+                # If the chunk is smaller than the window size (can happen at the very end), pad it
+                if len(chunk_poses) < window_size:
+                    padding_needed = window_size - len(chunk_poses)
+                    chunk_poses.extend([chunk_poses[-1]] * padding_needed)
+
+                print(f"  -> Generating chunk for frames {start_index} to {end_index-1}...", flush=True)
+                output_chunk = pipe(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    image=chunk_poses,
+                    controlnet_conditioning_scale=0.8,
+                    ip_adapter_image=composite_image,
+                    ip_adapter_scale=1.8,
+                    num_frames=window_size,
+                    guidance_scale=7.0,
+                    num_inference_steps=50,
+                ).frames[0]
+
+                # Stitching logic:
+                if i == 0:
+                    # For the first chunk, take all frames
+                    all_frames.extend(output_chunk)
+                else:
+                    # For subsequent chunks, take only the new frames (the last 'stride' frames)
+                    all_frames.extend(output_chunk[-stride:])
+                
+                if end_index >= total_frames:
+                    break # We've processed the last frames
+
+        # Trim any excess frames from the final list
+        video_frames = all_frames[:total_frames]
+        print(f"✅ Step 3/5: Finished generation. Total frames: {len(video_frames)}", flush=True)
+
+        print("🚀 Step 4/5: Post-processing (export, upscale, smooth)...", flush=True)
         export_video_with_imageio(video_frames, raw_video_path, fps=8)
         upscale_video(raw_video_path, upscaled_video_path)
         smooth_video(upscaled_video_path, final_video_path, target_fps=48)
 
+        print("✅ Step 5/5: Done!", flush=True)
         return {"filename": final_filename}
 
     finally:
         print("🧹 Cleaning up...", flush=True)
         gc.collect()
         torch.cuda.empty_cache()
-
         if raw_video_path and os.path.exists(raw_video_path):
             os.remove(raw_video_path)
         if upscaled_video_path and os.path.exists(upscaled_video_path):
