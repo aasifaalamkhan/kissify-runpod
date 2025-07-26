@@ -4,8 +4,7 @@ import uuid
 import gc
 import time
 from PIL import Image
-# FIX: Import the new DPM++ scheduler
-from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler, ControlNetModel, DPMSolverMultistepScheduler
+from diffusers import AnimateDiffPipeline, MotionAdapter, ControlNetModel, DPMSolverMultistepScheduler
 import numpy as np
 
 from utils import (
@@ -27,7 +26,6 @@ device = "cuda"
 controlnet_model_id = "lllyasviel/sd-controlnet-openpose"
 controlnet = ControlNetModel.from_pretrained(controlnet_model_id, torch_dtype=torch.float16).to(device)
 
-# FIX: Switch back to the high-quality photorealistic base model
 base_model_id = "SG161222/Realistic_Vision_V5.1_noVAE"
 motion_module_id = "guoyww/animatediff-motion-adapter-v1-5-3"
 ip_adapter_repo_id = "h94/IP-Adapter"
@@ -41,7 +39,6 @@ pipe = AnimateDiffPipeline.from_pretrained(
     torch_dtype=torch.float16,
 ).to(device)
 
-# FIX: Use the advanced DPM++ 2M Karras scheduler for higher quality results
 pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, use_karras_sigmas=True)
 
 
@@ -53,10 +50,8 @@ print("[INFO] Loading and combining two Kissing LoRAs...", flush=True)
 pipe.load_lora_weights("Remade-AI/kissing", weight_name="Kissing.safetensors", adapter_name="style")
 pipe.load_lora_weights("ighoshsubho/Wan-I2V-LoRA-Kiss", weight_name="wan-i2v-lora-kiss.safetensors", adapter_name="motion")
 
-# Set the weights for how to blend the two LoRAs
 pipe.set_adapters(["style", "motion"], adapter_weights=[0.6, 0.6])
 
-# Fuse the combined LoRAs for better performance
 pipe.fuse_lora()
 
 
@@ -87,6 +82,12 @@ def generate_kissing_video(input_data):
         composite_image = Image.new('RGB', (448, 224))
         composite_image.paste(face1_cropped, (0, 0))
         composite_image.paste(face2_cropped, (224, 0))
+        
+        # --- NEW: Save composite image and yield its filename ---
+        composite_filename = f"{unique_id}_composite.jpg"
+        composite_image_path = os.path.join(OUTPUT_DIR, composite_filename)
+        composite_image.save(composite_image_path)
+        yield {'composite_filename': composite_filename}
 
 
         prompt = "photo of a man and a woman kissing, faces of the people from the reference image, best quality, realistic, masterpiece, high resolution"

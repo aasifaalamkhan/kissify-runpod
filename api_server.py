@@ -1,6 +1,6 @@
 import os
 from flask import Flask, request, jsonify, send_from_directory, url_for, Response, stream_with_context
-from inference import generate_kissing_video, pipe # This line loads and prepares the model
+from inference import generate_kissing_video, pipe 
 import json
 
 app = Flask(__name__)
@@ -12,11 +12,11 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 print("✅ [INFO] Model loaded and ready via inference.py import.")
 
-# --- Route to Serve Video Files ---
+# --- Route to Serve Video and Image Files ---
 @app.route('/outputs/<path:filename>')
 def serve_video(filename):
     """
-    Serves a video file from the output directory.
+    Serves a file (video or image) from the output directory.
     """
     return send_from_directory(OUTPUT_DIR, filename, as_attachment=False)
 
@@ -37,10 +37,20 @@ def handle_generation():
         try:
             # The inference function now yields its progress
             for log_message in generate_kissing_video(data):
-                # Check if the message is the final result or a log
+                # Check if the message is the final result, composite filename, or a log
                 if isinstance(log_message, dict) and 'filename' in log_message:
                     final_filename = log_message['filename']
-                    yield f"data: {json.dumps({'status': 'Done'})}\n\n" # Signal completion
+                    yield f"data: {json.dumps({'status': 'Done'})}\n\n"
+                # --- NEW: Handle the composite image filename ---
+                elif isinstance(log_message, dict) and 'composite_filename' in log_message:
+                    comp_filename = log_message['composite_filename']
+                    proto = request.headers.get("X-Forwarded-Proto", "http")
+                    host = request.headers.get("X-Forwarded-Host", request.host)
+                    base_url = f"{proto}://{host}"
+                    comp_path = url_for('serve_video', filename=comp_filename)
+                    comp_url = f"{base_url.rstrip('/')}{comp_path}"
+                    # Yield the composite image URL to the client
+                    yield f"data: {json.dumps({'composite_image_url': comp_url})}\n\n"
                 else:
                     # Send progress updates as Server-Sent Events (SSE)
                     yield f"data: {json.dumps({'status': log_message})}\n\n"
