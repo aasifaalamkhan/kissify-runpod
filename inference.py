@@ -61,11 +61,9 @@ def generate_kissing_video(input_data):
     try:
         unique_id = str(uuid.uuid4())
         raw_filename = f"{unique_id}_raw.mp4"
-        upscaled_filename = f"{unique_id}_upscaled.mp4"
-        final_filename = f"{unique_id}_final.mp4"
+        final_filename = f"{unique_id}_final.mp4" # We won't have an upscaled filename now
 
         raw_video_path = os.path.join(OUTPUT_DIR, raw_filename)
-        upscaled_video_path = os.path.join(OUTPUT_DIR, upscaled_filename)
         final_video_path = os.path.join(OUTPUT_DIR, final_filename)
 
         print("🧠 Step 1/5: Loading and preparing images...", flush=True)
@@ -82,8 +80,8 @@ def generate_kissing_video(input_data):
         negative_prompt = "monochrome, lowres, bad anatomy, worst quality, low quality, blurry, nsfw, text, watermark, logo, two heads, multiple people, deformed"
         
         # --- Sliding Window Parameters ---
-        window_size = 32  # The model's context limit
-        stride = 16       # How many frames to advance each time (overlap is window_size - stride)
+        window_size = 32
+        stride = 16
         total_frames = len(POSE_SEQUENCE)
         all_frames = []
 
@@ -93,14 +91,12 @@ def generate_kissing_video(input_data):
                 start_index = i
                 end_index = i + window_size
                 
-                # Ensure we don't go past the end of the pose sequence
                 if end_index > total_frames:
                     start_index = max(0, total_frames - window_size)
                     end_index = total_frames
 
                 chunk_poses = POSE_SEQUENCE[start_index:end_index]
                 
-                # If the chunk is smaller than the window size (can happen at the very end), pad it
                 if len(chunk_poses) < window_size:
                     padding_needed = window_size - len(chunk_poses)
                     chunk_poses.extend([chunk_poses[-1]] * padding_needed)
@@ -118,25 +114,25 @@ def generate_kissing_video(input_data):
                     num_inference_steps=50,
                 ).frames[0]
 
-                # Stitching logic:
                 if i == 0:
-                    # For the first chunk, take all frames
                     all_frames.extend(output_chunk)
                 else:
-                    # For subsequent chunks, take only the new frames (the last 'stride' frames)
                     all_frames.extend(output_chunk[-stride:])
                 
                 if end_index >= total_frames:
-                    break # We've processed the last frames
+                    break
 
-        # Trim any excess frames from the final list
         video_frames = all_frames[:total_frames]
         print(f"✅ Step 3/5: Finished generation. Total frames: {len(video_frames)}", flush=True)
 
-        print("🚀 Step 4/5: Post-processing (export, upscale, smooth)...", flush=True)
+        print("🚀 Step 4/5: Post-processing (export & smooth)...", flush=True)
         export_video_with_imageio(video_frames, raw_video_path, fps=8)
-        upscale_video(raw_video_path, upscaled_video_path)
-        smooth_video(upscaled_video_path, final_video_path, target_fps=48)
+        
+        # --- CHANGE 1: Commented out the upscale_video line ---
+        # upscale_video(raw_video_path, upscaled_video_path)
+        
+        # --- CHANGE 2: Changed input for smooth_video to raw_video_path ---
+        smooth_video(raw_video_path, final_video_path, target_fps=48)
 
         print("✅ Step 5/5: Done!", flush=True)
         return {"filename": final_filename}
@@ -147,5 +143,7 @@ def generate_kissing_video(input_data):
         torch.cuda.empty_cache()
         if raw_video_path and os.path.exists(raw_video_path):
             os.remove(raw_video_path)
-        if upscaled_video_path and os.path.exists(upscaled_video_path):
-            os.remove(upscaled_video_path)
+        # We no longer have an upscaled_video_path to remove
+        # if upscaled_video_path and os.path.exists(upscaled_video_path):
+        #     os.remove(upscaled_video_path)
+
