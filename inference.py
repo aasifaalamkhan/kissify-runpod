@@ -18,21 +18,24 @@ motion_module_id = "guoyww/animatediff-motion-adapter-v1-5-3"
 ip_adapter_repo_id = "h94/IP-Adapter"
 device = "cuda"
 
+# --- Load models in full precision (float32) to prevent numerical instability ---
 image_encoder = CLIPVisionModelWithProjection.from_pretrained(
-    ip_adapter_repo_id, subfolder="models/image_encoder", torch_dtype=torch.float16
+    ip_adapter_repo_id, subfolder="models/image_encoder"
 ).to(device).eval()
 
 image_processor = CLIPImageProcessor.from_pretrained("openai/clip-vit-large-patch14")
 
-motion_adapter = MotionAdapter.from_pretrained(motion_module_id, torch_dtype=torch.float16).to(device)
+motion_adapter = MotionAdapter.from_pretrained(motion_module_id).to(device)
 
 pipe = AnimateDiffPipeline.from_pretrained(
     base_model_id,
     motion_adapter=motion_adapter,
-    torch_dtype=torch.float16
+    # torch_dtype is removed to default to float32
 )
 pipe.scheduler = DDIMScheduler.from_pretrained(base_model_id, subfolder="scheduler")
-pipe.enable_model_cpu_offload()
+# --- Move the entire pipeline to the GPU upfront ---
+pipe.to(device)
+
 
 pipe.load_ip_adapter(
     ip_adapter_repo_id,
@@ -62,16 +65,16 @@ def generate_kissing_video(input_data):
     negative_embeds = torch.zeros_like(positive_embeds)
     ip_embeds = torch.cat([negative_embeds, positive_embeds], dim=0)
 
-    # --- New, highly descriptive default prompt for better quality ---
+    # --- FIX: New improved prompt and settings ---
     prompt = (input_data.get("prompt") or "").strip()
     if not prompt:
-        prompt = "masterpiece, best quality, 4k, ultra-detailed photo of a man and a woman in a gentle, passionate, romantic kiss, closed eyes, cinematic lighting, soft focus background"
+        prompt = "masterpiece, best quality, ultra-detailed photo of a passionate kiss between a man and a woman, closed eyes, soft lighting, cinematic close-up, intimate embrace, delicate facial expressions, highly detailed, ultra-realistic, photorealistic, 4k"
     
-    # --- New, more specific negative prompt to avoid bad results ---
-    negative_prompt = "cartoon, painting, illustration, (worst quality, low quality, normal quality:2), deformed, ugly, disfigured, weird faces, open mouths, eyes open, awkward, stiff, not kissing, two men, two women, blurry, duplicate, watermark, text"
+    # --- FIX: Tighter negative prompt ---
+    negative_prompt = "cartoon, painting, illustration, (worst quality, low quality, normal quality:2), deformed, ugly, disfigured, weird faces, open mouths, eyes open, awkward poses, stiff, blurry"
 
-    # --- Increased IP-Adapter scale for better face similarity ---
-    pipe.set_ip_adapter_scale(1.3)
+    # --- FIX: Increased IP-Adapter scale for better face matching ---
+    pipe.set_ip_adapter_scale(1.5)
 
     print(f"🎨 Generating animation with prompt: '{prompt}'", flush=True)
     with torch.inference_mode():
@@ -79,9 +82,9 @@ def generate_kissing_video(input_data):
             prompt=prompt,
             negative_prompt=negative_prompt,
             ip_adapter_image_embeds=[ip_embeds],
-            num_frames=32, # FIX: Reduced from 40 to 32 to respect the model's limit
-            guidance_scale=7.5,
-            num_inference_steps=40,
+            num_frames=32, # Kept at 32 due to model limitations
+            guidance_scale=5.0, # FIX: Lowered for smoother, more natural motion
+            num_inference_steps=50, # FIX: Increased for higher quality frames
         ).frames[0]
 
     video_frames = result
@@ -90,7 +93,8 @@ def generate_kissing_video(input_data):
     filename = f"{uuid.uuid4()}.mp4"
     output_path = os.path.join(OUTPUT_DIR, filename)
     
-    export_video_with_imageio(video_frames, output_path, fps=8)
+    # --- FIX: Increased FPS for smoother playback ---
+    export_video_with_imageio(video_frames, output_path, fps=24)
 
     if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
         raise RuntimeError("MP4 export failed: The output file is missing or empty.")
