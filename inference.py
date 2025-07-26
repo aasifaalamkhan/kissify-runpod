@@ -13,7 +13,7 @@ from utils import (
 
 # --- Define constants ---
 OUTPUT_DIR = "/workspace/outputs"
-MOTION_TEMPLATE_PATH = "/workspace/motion_template.mp4"
+MOTION_TEMPLATE_PATH = "/workspace/kissify-runpod/motion_template.mp4"
 
 # --- Load Models ---
 print("[INFO] Initializing models and pipeline...", flush=True)
