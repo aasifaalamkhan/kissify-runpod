@@ -4,6 +4,7 @@ import uuid
 import gc
 import time
 from PIL import Image
+# Import the new DPM++ scheduler
 from diffusers import AnimateDiffPipeline, MotionAdapter, ControlNetModel, DPMSolverMultistepScheduler
 import numpy as np
 
@@ -39,7 +40,12 @@ pipe = AnimateDiffPipeline.from_pretrained(
     torch_dtype=torch.float16,
 ).to(device)
 
-pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, use_karras_sigmas=True)
+# FIX: Add the required 'final_sigmas_type' parameter to resolve the error.
+pipe.scheduler = DPMSolverMultistepScheduler.from_config(
+    pipe.scheduler.config, 
+    use_karras_sigmas=True,
+    final_sigmas_type='sigma_min' 
+)
 
 
 print("[INFO] Loading ONE IP-Adapter.", flush=True)
@@ -83,7 +89,6 @@ def generate_kissing_video(input_data):
         composite_image.paste(face1_cropped, (0, 0))
         composite_image.paste(face2_cropped, (224, 0))
         
-        # --- NEW: Save composite image and yield its filename ---
         composite_filename = f"{unique_id}_composite.jpg"
         composite_image_path = os.path.join(OUTPUT_DIR, composite_filename)
         composite_image.save(composite_image_path)
