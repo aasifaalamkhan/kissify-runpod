@@ -65,4 +65,5 @@ def export_video_with_opencv(video_frames, output_path, fps):
         out.write(frame_bgr)
         
     out.release()
-    print(f"Video saved to {output_path} using OpenCV with avc1 codec.")
+    # Add flush=True to ensure this message appears immediately
+    print(f"Video saved to {output_path} using OpenCV with avc1 codec.", flush=True)
