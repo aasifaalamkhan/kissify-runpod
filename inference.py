@@ -8,15 +8,12 @@ from diffusers.utils import export_to_video
 from utils import load_face_images, prepare_ip_adapter_inputs, upload_to_catbox
 
 # ========= Load Models =========
-# Using a print statement for logging in the server environment
 print("[INFO] Initializing models and pipeline...")
 
 base_model_id = "SG161222/Realistic_Vision_V5.1_noVAE"
 motion_module_id = "guoyww/animatediff-motion-adapter-v1-5-3"
 ip_adapter_repo_id = "h94/IP-Adapter"
-
-# Set device
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = "cuda"
 
 image_encoder = CLIPVisionModelWithProjection.from_pretrained(
     ip_adapter_repo_id, subfolder="models/image_encoder", torch_dtype=torch.float16
@@ -32,10 +29,6 @@ pipe = AnimateDiffPipeline.from_pretrained(
     torch_dtype=torch.float16
 )
 pipe.scheduler = DDIMScheduler.from_pretrained(base_model_id, subfolder="scheduler")
-
-# Offload to CPU until a request comes in
-pipe.enable_model_cpu_offload()
-
 pipe.load_ip_adapter(
     ip_adapter_repo_id,
     subfolder="models",
@@ -47,9 +40,7 @@ print("[INFO] Models and pipeline are initialized.")
 
 # ========= Video Generation Logic =========
 def generate_kissing_video(input_data):
-    # Move pipeline to GPU for inference
-    pipe.to(device)
-
+    # Model is already on the GPU from the server startup
     print("🧠 Loading and preparing face images...")
     face_images = load_face_images([
         input_data['face_image1'],
@@ -66,9 +57,6 @@ def generate_kissing_video(input_data):
 
     stacked_embeds = torch.cat(face_embeds, dim=0).mean(dim=0, keepdim=True)
 
-    # The IP-Adapter docs recommend setting image_embeds directly in the call
-    # This is cleaner than monkey-patching the UNet's forward method
-
     prompt = (input_data.get("prompt") or "").strip()
     if not prompt:
         prompt = "romantic kiss, closeup, cinematic, photorealistic, 4k, trending on artstation"
@@ -76,7 +64,6 @@ def generate_kissing_video(input_data):
     negative_prompt = "bad quality, worse quality, low resolution, deformed, ugly"
 
     print(f"🎨 Generating animation with prompt: '{prompt}'")
-
     with torch.inference_mode():
         result = pipe(
             prompt=prompt,
@@ -88,24 +75,16 @@ def generate_kissing_video(input_data):
         ).frames[0]
 
     video_frames = result
-
     print("💾 Exporting video...")
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
       temp_path = f.name
     export_to_video(video_frames, temp_path, fps=8)
 
-    if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
-        raise RuntimeError("Exported video file is empty or missing.")
-
     print("☁️ Uploading to Catbox...")
     video_url = upload_to_catbox(temp_path)
 
-    # Clean up the temporary file
     os.remove(temp_path)
     torch.cuda.empty_cache()
-    # Move pipe back to CPU to save VRAM for the next job
-    pipe.to("cpu")
-
 
     print("✅ Done!")
     return {"video_url": video_url}
