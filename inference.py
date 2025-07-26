@@ -4,8 +4,8 @@ import tempfile
 from PIL import Image
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler
-from diffusers.utils import export_to_video
-from utils import load_face_images, prepare_ip_adapter_inputs, upload_to_catbox
+# --- Use our custom video exporter instead of the default one ---
+from utils import load_face_images, prepare_ip_adapter_inputs, upload_to_catbox, export_video_with_opencv
 
 # ========= Load Models =========
 print("[INFO] Initializing models and pipeline...")
@@ -55,18 +55,10 @@ def generate_kissing_video(input_data):
         embeds = image_encoder(**inputs).image_embeds
         face_embeds.append(embeds)
 
-    # This is the positive embedding
     stacked_embeds = torch.cat(face_embeds, dim=0).mean(dim=0, keepdim=True)
-
-    # Reshape the tensor to be 3D [batch_size, num_images, embedding_dim]
     stacked_embeds = stacked_embeds.unsqueeze(0)
-
-    # Create a tensor of zeros for the negative embeddings
     negative_embeds = torch.zeros_like(stacked_embeds)
-    
-    # Combine them into a single tensor for the pipeline
     ip_embeds = torch.cat([negative_embeds, stacked_embeds], dim=0)
-
 
     prompt = (input_data.get("prompt") or "").strip()
     if not prompt:
@@ -76,37 +68,30 @@ def generate_kissing_video(input_data):
 
     print(f"🎨 Generating animation with prompt: '{prompt}'")
     with torch.inference_mode():
-        # --- FIX: Wrap the tensor in a list ---
         result = pipe(
             prompt=prompt,
             negative_prompt=negative_prompt,
             num_frames=16,
             guidance_scale=7.0,
             num_inference_steps=25,
-            ip_adapter_image_embeds=[ip_embeds] # Pass the tensor inside a list
+            ip_adapter_image_embeds=[ip_embeds]
         ).frames[0]
 
     video_frames = result
-    print("💾 Exporting video...")
-    # Create a temporary file path
+    print("💾 Exporting video using custom OpenCV function...")
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
       temp_path = f.name
     
-    # Export the video frames to the temporary file
-    export_to_video(video_frames, temp_path, fps=8)
+    # --- Use our new, more reliable export function ---
+    export_video_with_opencv(video_frames, temp_path, fps=8)
 
-    # --- FIX: Add a check to ensure the video file is not empty ---
     if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
-        raise RuntimeError(
-            "Video export failed: The temporary video file is missing or empty. "
-            "This could be an issue with the OpenCV installation or video codecs in the environment."
-        )
+        raise RuntimeError("Video export failed: The temporary video file is missing or empty.")
     
     print(f"✅ Video exported successfully. Size: {os.path.getsize(temp_path)} bytes.")
     print("☁️ Uploading to Catbox...")
     video_url = upload_to_catbox(temp_path)
 
-    # Clean up the temporary file
     os.remove(temp_path)
     torch.cuda.empty_cache()
 
