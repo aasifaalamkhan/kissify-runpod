@@ -4,7 +4,8 @@ import uuid
 import gc
 import time
 from PIL import Image
-from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler, ControlNetModel
+# FIX: Import the new scheduler
+from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler, ControlNetModel, EulerAncestralDiscreteScheduler
 import numpy as np
 
 from utils import (
@@ -26,7 +27,8 @@ device = "cuda"
 controlnet_model_id = "lllyasviel/sd-controlnet-openpose"
 controlnet = ControlNetModel.from_pretrained(controlnet_model_id, torch_dtype=torch.float16).to(device)
 
-base_model_id = "SG161222/Realistic_Vision_V5.1_noVAE"
+# FIX: Switch to the standard, more stable base model for AnimateDiff
+base_model_id = "runwayml/stable-diffusion-v1-5"
 motion_module_id = "guoyww/animatediff-motion-adapter-v1-5-3"
 ip_adapter_repo_id = "h94/IP-Adapter"
 
@@ -38,12 +40,14 @@ pipe = AnimateDiffPipeline.from_pretrained(
     controlnet=controlnet,
     torch_dtype=torch.float16,
 ).to(device)
-pipe.scheduler = DDIMScheduler(beta_schedule="linear", num_train_timesteps=1000)
 
-# FIX: Load the IP-Adapter twice to handle two separate face images.
-print("[INFO] Loading TWO IP-Adapters for separate face guidance...", flush=True)
+# FIX: Use a more stable and efficient scheduler
+pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
+
+# Revert to loading only ONE IP-Adapter, as the pipeline only supports one.
+print("[INFO] Loading ONE IP-Adapter.", flush=True)
 pipe.load_ip_adapter(ip_adapter_repo_id, subfolder="models", weight_name="ip-adapter_sd15.bin")
-pipe.load_ip_adapter(ip_adapter_repo_id, subfolder="models", weight_name="ip-adapter_sd15.bin")
+
 
 POSE_SEQUENCE = load_pose_sequence(CACHED_POSE_PATH)
 if POSE_SEQUENCE is None:
@@ -69,6 +73,10 @@ def generate_kissing_video(input_data):
         
         face1_cropped = crop_face(pil_images[0]).resize((224, 224))
         face2_cropped = crop_face(pil_images[1]).resize((224, 224))
+        composite_image = Image.new('RGB', (448, 224))
+        composite_image.paste(face1_cropped, (0, 0))
+        composite_image.paste(face2_cropped, (224, 0))
+
 
         prompt = "photo of a man and a woman kissing, faces of the people from the reference image, best quality, realistic, masterpiece, high resolution"
         negative_prompt = "monochrome, lowres, bad anatomy, worst quality, low quality, blurry, nsfw, text, watermark, logo, two heads, multiple people, deformed"
@@ -80,9 +88,6 @@ def generate_kissing_video(input_data):
         total_frames = len(POSE_SEQUENCE)
         all_frames = []
         
-        # FIX: Set the weights for each of the two IP-Adapters.
-        pipe.set_ip_adapter_scale([0.7, 0.7])
-
         yield f"🎨 Step 2/5: Starting sliding window generation for {total_frames} frames ({generation_steps} steps/chunk)..."
         with torch.inference_mode():
             for i in range(0, total_frames - window_size + stride, stride):
@@ -104,9 +109,9 @@ def generate_kissing_video(input_data):
                     prompt=prompt,
                     negative_prompt=negative_prompt,
                     image=chunk_poses,
-                    controlnet_conditioning_scale=0.9,
-                    ip_adapter_image=[face1_cropped, face2_cropped],
-                    # ip_adapter_scale is now set before the loop using set_ip_adapter_scale
+                    controlnet_conditioning_scale=0.8, # Lowered slightly for stability
+                    ip_adapter_image=composite_image,
+                    ip_adapter_scale=0.7,
                     num_frames=window_size,
                     guidance_scale=7.0,
                     num_inference_steps=generation_steps,
