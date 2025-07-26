@@ -1,11 +1,14 @@
 import os
 import torch
-import tempfile
+import uuid # For generating unique filenames
 from PIL import Image
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler
-# --- Use our custom video exporter instead of the default one ---
-from utils import load_face_images, prepare_ip_adapter_inputs, upload_to_catbox, export_video_with_opencv
+from utils import load_face_images, prepare_ip_adapter_inputs, export_video_with_opencv
+
+# Define the directory where videos will be stored
+OUTPUT_DIR = "/workspace/outputs"
+
 
 # ========= Load Models =========
 print("[INFO] Initializing models and pipeline...")
@@ -40,7 +43,6 @@ print("[INFO] Models and pipeline are initialized.")
 
 # ========= Video Generation Logic =========
 def generate_kissing_video(input_data):
-    # Model is already on the GPU from the server startup
     print("🧠 Loading and preparing face images...")
     face_images = load_face_images([
         input_data['face_image1'],
@@ -78,22 +80,21 @@ def generate_kissing_video(input_data):
         ).frames[0]
 
     video_frames = result
-    print("💾 Exporting video using custom OpenCV function...")
-    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
-      temp_path = f.name
+    print("💾 Exporting video to local storage...")
     
-    # --- Use our new, more reliable export function ---
-    export_video_with_opencv(video_frames, temp_path, fps=8)
-
-    if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
-        raise RuntimeError("Video export failed: The temporary video file is missing or empty.")
+    # --- Create a unique filename and save to the persistent /workspace/outputs directory ---
+    filename = f"{uuid.uuid4()}.mp4"
+    output_path = os.path.join(OUTPUT_DIR, filename)
     
-    print(f"✅ Video exported successfully. Size: {os.path.getsize(temp_path)} bytes.")
-    print("☁️ Uploading to Catbox...")
-    video_url = upload_to_catbox(temp_path)
+    export_video_with_opencv(video_frames, output_path, fps=8)
 
-    os.remove(temp_path)
+    if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+        raise RuntimeError("Video export failed: The output video file is missing or empty.")
+    
+    print(f"✅ Video exported successfully to {output_path}. Size: {os.path.getsize(output_path)} bytes.")
+
     torch.cuda.empty_cache()
 
     print("✅ Done!")
-    return {"video_url": video_url}
+    # --- Return the filename instead of a Catbox URL ---
+    return {"filename": filename}
