@@ -43,11 +43,11 @@ print("[INFO] WORKAROUND: Loading only ONE IP-Adapter.", flush=True)
 pipe.load_ip_adapter(ip_adapter_repo_id, subfolder="models", weight_name="ip-adapter_sd15.bin")
 
 # --- Pre-process and cache the pose sequence for ControlNet ---
+# We still load the full sequence, but will only use the first 32 poses
 POSE_SEQUENCE = load_pose_sequence(CACHED_POSE_PATH)
 if POSE_SEQUENCE is None:
     POSE_SEQUENCE = extract_pose_sequence(MOTION_TEMPLATE_PATH)
     save_pose_sequence(POSE_SEQUENCE, CACHED_POSE_PATH)
-NUM_FRAMES = len(POSE_SEQUENCE)
 print("✅ All models and pose data are ready.", flush=True)
 
 
@@ -85,17 +85,21 @@ def generate_kissing_video(input_data):
 
         prompt = "photo of a man and a woman kissing, faces of the people from the reference image, best quality, realistic, masterpiece, high resolution"
         negative_prompt = "monochrome, lowres, bad anatomy, worst quality, low quality, blurry, nsfw, text, watermark, logo, two heads, multiple people, deformed"
+        
+        # We need to slice the pose sequence to match the number of frames
+        num_frames_to_generate = 32
+        pose_sequence_for_generation = POSE_SEQUENCE[:num_frames_to_generate]
 
-        print(f"🎨 Step 4/5: Generating animation ({NUM_FRAMES} frames)...", flush=True)
+        print(f"🎨 Step 4/5: Generating animation ({num_frames_to_generate} frames)...", flush=True)
         with torch.inference_mode():
             output = pipe(
                 prompt=prompt,
                 negative_prompt=negative_prompt,
-                image=POSE_SEQUENCE, # Using ControlNet with the pose sequence
+                image=pose_sequence_for_generation, # Using the sliced pose sequence
                 controlnet_conditioning_scale=0.8,
                 ip_adapter_image=composite_image,
                 ip_adapter_scale=1.8,
-                num_frames=NUM_FRAMES,
+                num_frames=num_frames_to_generate, # FIX: Hard-coded to the model's limit
                 guidance_scale=7.0,
                 num_inference_steps=50,
             ).frames[0]
