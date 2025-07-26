@@ -11,7 +11,8 @@ OUTPUT_DIR = "/workspace/outputs"
 
 
 # ========= Load Models =========
-print("[INFO] Initializing models and pipeline...")
+# These prints run at startup and usually flush correctly, but adding flush=True is safer.
+print("[INFO] Initializing models and pipeline...", flush=True)
 
 base_model_id = "SG161222/Realistic_Vision_V5.1_noVAE"
 motion_module_id = "guoyww/animatediff-motion-adapter-v1-5-3"
@@ -39,18 +40,19 @@ pipe.load_ip_adapter(
 )
 pipe.set_ip_adapter_scale(1.0)
 
-print("[INFO] Models and pipeline are initialized.")
+print("[INFO] Models and pipeline are initialized.", flush=True)
 
 # ========= Video Generation Logic =========
 def generate_kissing_video(input_data):
-    print("🧠 Loading and preparing face images...")
+    # Add flush=True to all print statements to ensure immediate output
+    print("🧠 Loading and preparing face images...", flush=True)
     face_images = load_face_images([
         input_data['face_image1'],
         input_data['face_image2']
     ])
     face_images = prepare_ip_adapter_inputs(face_images, device)
 
-    print("🔍 Encoding faces with IP-Adapter...")
+    print("🔍 Encoding faces with IP-Adapter...", flush=True)
     face_embeds = []
     for face in face_images:
         inputs = image_processor(face, return_tensors="pt", do_rescale=False).to(device)
@@ -68,7 +70,7 @@ def generate_kissing_video(input_data):
     
     negative_prompt = "bad quality, worse quality, low resolution, deformed, ugly"
 
-    print(f"🎨 Generating animation with prompt: '{prompt}'")
+    print(f"🎨 Generating animation with prompt: '{prompt}'", flush=True)
     with torch.inference_mode():
         result = pipe(
             prompt=prompt,
@@ -80,21 +82,19 @@ def generate_kissing_video(input_data):
         ).frames[0]
 
     video_frames = result
-    print("💾 Exporting video to local storage as MP4...")
+    print("💾 Exporting video to local storage as MP4...", flush=True)
     
-    # --- Reverted to creating an MP4 file ---
     filename = f"{uuid.uuid4()}.mp4"
     output_path = os.path.join(OUTPUT_DIR, filename)
     
-    # Use our reliable OpenCV exporter
     export_video_with_opencv(video_frames, output_path, fps=8)
 
     if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
         raise RuntimeError("MP4 export failed: The output file is missing or empty.")
     
-    print(f"✅ MP4 exported successfully to {output_path}. Size: {os.path.getsize(output_path)} bytes.")
+    print(f"✅ MP4 exported successfully to {output_path}. Size: {os.path.getsize(output_path)} bytes.", flush=True)
 
     torch.cuda.empty_cache()
 
-    print("✅ Done!")
+    print("✅ Done!", flush=True)
     return {"filename": filename}
