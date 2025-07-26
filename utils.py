@@ -50,13 +50,40 @@ def extract_pose_sequence(template_video_path):
     print(f"✅ Extracted {len(pose_sequence)} poses from motion template.", flush=True)
     return pose_sequence
 
+# --- NEW FUNCTIONS FOR CACHING POSES ---
+def save_pose_sequence(pose_sequence, filepath):
+    """
+    Saves a list of PIL Images (pose sequence) to a .npy file.
+    Each PIL Image is converted to a NumPy array (H, W, 3).
+    """
+    # Convert list of PIL Images to list of NumPy arrays
+    numpy_poses = [np.array(p) for p in pose_sequence]
+    # Use np.save to save the list of arrays (it handles object arrays)
+    np.save(filepath, numpy_poses)
+    print(f"✅ Saved pose sequence to {filepath}", flush=True)
+
+def load_pose_sequence(filepath):
+    """
+    Loads a list of PIL Images (pose sequence) from a .npy file.
+    """
+    if not os.path.exists(filepath):
+        return None
+
+    print(f"Loading cached pose sequence from {filepath}...", flush=True)
+    # Use np.load to load the list of arrays
+    numpy_poses = np.load(filepath, allow_pickle=True) # allow_pickle is important for object arrays
+    # Convert list of NumPy arrays back to PIL Images
+    pose_sequence = [Image.fromarray(p) for p in numpy_poses]
+    print(f"✅ Loaded {len(pose_sequence)} poses from cache.", flush=True)
+    return pose_sequence
+
 def crop_face(pil_image):
     boxes, _ = face_detector.detect(pil_image)
     if boxes is None or len(boxes) == 0:
         # If no face detected, return the original image resized as a fallback
         print("⚠️ Warning: No face detected. Using resized original image.", flush=True)
         return pil_image.resize((224, 224))
-    
+
     box = boxes[0]
     cropped_image = pil_image.crop(box)
     return cropped_image
@@ -108,7 +135,7 @@ def upscale_video(input_path, output_path, device="cuda"):
         ret, frame = cap.read()
         if not ret:
             break
-        
+
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         output, _ = upsampler.enhance(img, outscale=4)
         output = cv2.cvtColor(output, cv2.COLOR_RGB_BGR)
