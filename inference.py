@@ -4,7 +4,6 @@ import uuid # For generating unique filenames
 from PIL import Image
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler
-# --- We need the imageio exporter and the input preparer again ---
 from utils import load_face_images, prepare_ip_adapter_inputs, export_video_with_imageio
 
 # Define the directory where videos will be stored
@@ -19,7 +18,6 @@ motion_module_id = "guoyww/animatediff-motion-adapter-v1-5-3"
 ip_adapter_repo_id = "h94/IP-Adapter"
 device = "cuda"
 
-# --- FIX: We must load the image encoder and processor to manually create embeddings ---
 image_encoder = CLIPVisionModelWithProjection.from_pretrained(
     ip_adapter_repo_id, subfolder="models/image_encoder", torch_dtype=torch.float16
 ).to(device).eval()
@@ -36,7 +34,6 @@ pipe = AnimateDiffPipeline.from_pretrained(
 pipe.scheduler = DDIMScheduler.from_pretrained(base_model_id, subfolder="scheduler")
 pipe.enable_model_cpu_offload()
 
-# Load the IP-Adapter
 pipe.load_ip_adapter(
     ip_adapter_repo_id,
     subfolder="models",
@@ -47,56 +44,44 @@ print("[INFO] Models and pipeline are initialized.", flush=True)
 
 # ========= Video Generation Logic =========
 def generate_kissing_video(input_data):
-    # --- FIX: Reverting to manual embedding generation to handle two faces correctly ---
     print("🧠 Loading and preparing face images...", flush=True)
     pil_images = load_face_images([
         input_data['face_image1'],
         input_data['face_image2']
     ])
-    # Prepare images for the encoder
     prepared_images = prepare_ip_adapter_inputs(pil_images, device)
 
     print("🔍 Encoding faces with IP-Adapter...", flush=True)
     face_embeds = []
     for image in prepared_images:
-        # Manually encode each image
         embeds = image_encoder(image).image_embeds
         face_embeds.append(embeds)
 
-    # Average the embeddings of the two faces
     positive_embeds = torch.cat(face_embeds, dim=0).mean(dim=0, keepdim=True)
-    
-    # --- FIX: Add the missing dimension back to the tensor ---
-    # The pipeline expects a 3D tensor [batch_size, num_images, embedding_dim].
-    # The averaged tensor is 2D, so we add the batch_size dimension back.
     positive_embeds = positive_embeds.unsqueeze(0)
-
-    # Create negative embeddings (unconditional)
     negative_embeds = torch.zeros_like(positive_embeds)
-    
-    # Combine for classifier-free guidance
     ip_embeds = torch.cat([negative_embeds, positive_embeds], dim=0)
 
-    # --- New, more descriptive default prompt ---
+    # --- New, highly descriptive default prompt for better quality ---
     prompt = (input_data.get("prompt") or "").strip()
     if not prompt:
-        prompt = "photo of a man and a woman in a passionate, romantic kiss, closeup, cinematic lighting, high detail, 4k"
+        prompt = "masterpiece, best quality, 4k, ultra-detailed photo of a man and a woman in a gentle, passionate, romantic kiss, closed eyes, cinematic lighting, soft focus background"
     
-    # --- New, more specific negative prompt ---
-    negative_prompt = "cartoon, painting, illustration, (worst quality, low quality, normal quality:2), deformed, ugly, disfigured, weird faces, open mouths, not kissing, two men, two women, blurry, duplicate"
+    # --- New, more specific negative prompt to avoid bad results ---
+    negative_prompt = "cartoon, painting, illustration, (worst quality, low quality, normal quality:2), deformed, ugly, disfigured, weird faces, open mouths, eyes open, awkward, stiff, not kissing, two men, two women, blurry, duplicate, watermark, text"
 
-    # --- Adjust IP-Adapter scale for stronger face influence ---
-    pipe.set_ip_adapter_scale(1.2)
+    # --- Increased IP-Adapter scale for better face similarity ---
+    pipe.set_ip_adapter_scale(1.3)
 
     print(f"🎨 Generating animation with prompt: '{prompt}'", flush=True)
     with torch.inference_mode():
         result = pipe(
             prompt=prompt,
             negative_prompt=negative_prompt,
-            ip_adapter_image_embeds=[ip_embeds], # Pass the combined embeddings
-            num_frames=16,
+            ip_adapter_image_embeds=[ip_embeds],
+            num_frames=40, # Increased from 16 to 40 for a 5-second video at 8fps
             guidance_scale=7.5,
-            num_inference_steps=30,
+            num_inference_steps=40, # Increased from 30 for more detail
         ).frames[0]
 
     video_frames = result
