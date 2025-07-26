@@ -4,8 +4,8 @@ import uuid
 import gc
 import time
 from PIL import Image
-# FIX: Import the new scheduler
-from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler, ControlNetModel, EulerAncestralDiscreteScheduler
+# FIX: Import the new DPM++ scheduler
+from diffusers import AnimateDiffPipeline, MotionAdapter, DDIMScheduler, ControlNetModel, DPMSolverMultistepScheduler
 import numpy as np
 
 from utils import (
@@ -27,8 +27,8 @@ device = "cuda"
 controlnet_model_id = "lllyasviel/sd-controlnet-openpose"
 controlnet = ControlNetModel.from_pretrained(controlnet_model_id, torch_dtype=torch.float16).to(device)
 
-# FIX: Switch to the standard, more stable base model for AnimateDiff
-base_model_id = "runwayml/stable-diffusion-v1-5"
+# FIX: Switch back to the high-quality photorealistic base model
+base_model_id = "SG161222/Realistic_Vision_V5.1_noVAE"
 motion_module_id = "guoyww/animatediff-motion-adapter-v1-5-3"
 ip_adapter_repo_id = "h94/IP-Adapter"
 
@@ -41,12 +41,23 @@ pipe = AnimateDiffPipeline.from_pretrained(
     torch_dtype=torch.float16,
 ).to(device)
 
-# FIX: Use a more stable and efficient scheduler
-pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
+# FIX: Use the advanced DPM++ 2M Karras scheduler for higher quality results
+pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, use_karras_sigmas=True)
 
-# Revert to loading only ONE IP-Adapter, as the pipeline only supports one.
+
 print("[INFO] Loading ONE IP-Adapter.", flush=True)
 pipe.load_ip_adapter(ip_adapter_repo_id, subfolder="models", weight_name="ip-adapter_sd15.bin")
+
+# Load and combine BOTH Kissing LoRAs
+print("[INFO] Loading and combining two Kissing LoRAs...", flush=True)
+pipe.load_lora_weights("Remade-AI/kissing", weight_name="Kissing.safetensors", adapter_name="style")
+pipe.load_lora_weights("ighoshsubho/Wan-I2V-LoRA-Kiss", weight_name="wan-i2v-lora-kiss.safetensors", adapter_name="motion")
+
+# Set the weights for how to blend the two LoRAs
+pipe.set_adapters(["style", "motion"], adapter_weights=[0.6, 0.6])
+
+# Fuse the combined LoRAs for better performance
+pipe.fuse_lora()
 
 
 POSE_SEQUENCE = load_pose_sequence(CACHED_POSE_PATH)
@@ -109,7 +120,7 @@ def generate_kissing_video(input_data):
                     prompt=prompt,
                     negative_prompt=negative_prompt,
                     image=chunk_poses,
-                    controlnet_conditioning_scale=0.8, # Lowered slightly for stability
+                    controlnet_conditioning_scale=0.8,
                     ip_adapter_image=composite_image,
                     ip_adapter_scale=0.7,
                     num_frames=window_size,
