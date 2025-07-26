@@ -106,7 +106,8 @@ def upscale_video(input_path, output_path, device="cuda"):
             break
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         output, _ = upsampler.enhance(img, outscale=4)
-        output = cv2.cvtColor(output, cv2.COLOR_RGB_BGR)
+        # --- THIS LINE IS NOW FIXED ---
+        output = cv2.cvtColor(output, cv2.COLOR_RGB2BGR)
         out.write(output)
     cap.release()
     out.release()
